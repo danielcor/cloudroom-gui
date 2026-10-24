@@ -1626,7 +1626,7 @@ class CloudroomService {
     }
     const delivery = this.deliver(thread.id);
     const shown = this.queue(thread.id).find((item) => item.id === id);
-    if (shown || !previous || binding(this.deps.db, thread.id)?.turnId === id) {
+    if (shown || (thread.status !== "error" && (!previous || binding(this.deps.db, thread.id)?.turnId === id))) {
       void delivery.catch(() => {});
       return shown ? { ok: true, delivery: "queued", queuedMessage: shown } : { ok: true, delivery: "sent" };
     }

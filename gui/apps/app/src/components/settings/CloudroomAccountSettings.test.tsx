@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
@@ -39,8 +39,8 @@ it("shows identity/offline status and signs out locally without a machine creati
   expect(await screen.findByText("member@example.invalid")).toBeDefined();
   expect(screen.getByText("VM is offline")).toBeDefined();
   expect(screen.queryByRole("button", { name: "Add a machine" })).toBeNull();
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Sign out" }), { button: 0 });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Sign out of this app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+  fireEvent.click(within(await screen.findByRole("dialog", { name: "Sign out of this app?" })).getByRole("button", { name: "Sign out" }));
   await waitFor(() => expect(sdk.cloudroom.logout).toHaveBeenCalledOnce());
   await screen.findByText("Not signed in to Cloudroom");
 });

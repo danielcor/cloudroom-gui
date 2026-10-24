@@ -762,9 +762,18 @@ export class CloudroomClient {
     await this.#json(`${sessionPath(sessionId)}/detach`, {});
   }
 
-  /** Answers an agent's secret request. `null` cancels it. */
-  async answerSecret(sessionId: string, id: string, values: Record<string, string> | null): Promise<void> {
-    await this.#json(`${sessionPath(sessionId)}/secrets/${encodeURIComponent(id)}`, values ? { values } : {});
+  /** Answers an agent's secret request. `null` cancels it, and `reason` tells the agent why. */
+  async answerSecret(sessionId: string, id: string, values: Record<string, string> | null, reason?: string): Promise<void> {
+    const path = `${sessionPath(sessionId)}/secrets/${encodeURIComponent(id)}`;
+    if (values) {
+      await this.#json(path, { values });
+      return;
+    }
+    // Cores before 0.1.76 reject unknown fields, so they get the cancel without its reason.
+    await this.#json(path, reason ? { reason } : {}).catch((error: unknown) => {
+      if (!(error instanceof CloudroomError && error.status === 422)) throw error;
+      return this.#json(path, {});
+    });
   }
 
   /** Answers an agent's request for a child in its own sandbox: the child thread started, or why it could not. */

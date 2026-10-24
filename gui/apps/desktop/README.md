@@ -201,40 +201,14 @@ CI enforces this lockstep. Direct edits that leave
 versions fail the build. Never edit either package version directly for a
 release; use `scripts/bump-version.mjs` so both files move together.
 
-The desktop release tag uses the locked version: `desktop-v<version>` for
-immutable releases and `desktop-latest` for the moving pointer.
-
-`build-desktop.yml` builds macOS and Linux in parallel jobs, then publishes
-both from one job. The moving release resets all of its assets on each publish,
-so a single publisher is what keeps one platform from deleting the other's
-binaries. Each platform has its own update feed file inside the same release
-tag:
-
-| Platform | Artifacts              | electron-updater metadata | Version feed                 |
-| -------- | ---------------------- | ------------------------- | ---------------------------- |
-| macOS    | `.dmg`, `.zip` (arm64) | `latest-mac.yml`          | `desktop-version.json`       |
-| Linux    | `.AppImage` (x64)      | `latest-linux.yml`        | `desktop-version-linux.json` |
-
-macOS keeps the unsuffixed feed name because released macOS builds already
-request it. Linux artifacts are unsigned; only the macOS binaries wait on the
-Apple signing secrets.
+Cloudroom releases are built and published by the root
+`.github/workflows/release-gui.yml` workflow (see the `release-gui` skill and
+[Auto-update](#auto-update)).
 
 ## Nightly channel
 
-The scheduled `publish-bb-app.yml` workflow runs from `main` every day at
-3:00 AM Pacific (`America/Los_Angeles`, including daylight-saving changes). It
-derives a unique version such as `0.34.1-nightly.<run-id>.<attempt>` without
-committing that version, publishes `bb-app` with the npm `nightly` dist-tag,
-and builds the desktop app from that same lockstep version.
-
-To publish or dry-run the channel manually from `main`, dispatch the same
-workflow with `npm_tag=nightly`. A non-dry run publishes both npm and desktop;
-a dry run validates only the npm package path.
-
-A stable release also refreshes the channel. A non-dry `npm_tag=latest` run
-publishes the release, then derives the next nightly version from the release
-commit and publishes npm and desktop nightly again. Without this step the
-nightly channel stays below `latest` until the next scheduled run.
+No workflow publishes nightly builds. A build made with
+`BB_DESKTOP_RELEASE_CHANNEL=nightly` (see below) still gets the nightly identity.
 
 The nightly desktop is a separate installation:
 
@@ -246,14 +220,6 @@ The nightly desktop is a separate installation:
 - version feeds: `desktop-version.json` (macOS) and
   `desktop-version-linux.json` (Linux)
 - icon: `assets/icon-nightly.icns` and `assets/icon-nightly.png`
-
-Download it from
-[`desktop-nightly`](https://github.com/get-bb/bb/releases/tag/desktop-nightly)
-or run the CLI build with:
-
-```bash
-npx bb-app@nightly
-```
 
 Stable and nightly desktop bundles can coexist. Electron-owned preferences,
 window state, and process supervision use separate application data
@@ -309,9 +275,7 @@ builds write `latest-*.yml`, so releases must be marked latest, not prerelease. 
 Electron auto-update unless `BB_DESKTOP_AUTO_UPDATE=1` is set.
 
 `bb Nightly` follows the equivalent isolated `desktop-nightly` release and
-`nightly-mac.yml`; it never reads or moves the stable feed. The scheduled
-workflow requires the complete signing/notarization secret set before
-publishing nightly desktop assets.
+`nightly-mac.yml`; it never reads or moves the stable feed.
 
 To verify a downloaded or unpacked build:
 

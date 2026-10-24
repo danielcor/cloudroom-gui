@@ -643,6 +643,30 @@ def visible(text, chars, lines):
 # and each part must upload within MAC_POST_SECONDS on a slow home connection.
 MAC_PART = 1024 * 1024
 MAC_POST_SECONDS = 60
+# New per helper process: when it changes, Core ends jobs the old process was running (#569).
+MAC_BOOT = uuid.uuid4().hex
+
+
+def mac_stdin(core, device, job):
+    """A job's input, downloaded after confirming it, so a big push never holds up other jobs on the stream (#576).
+    Older cores send it inside the job instead. None if it can't be downloaded."""
+    size = job.get('stdin_bytes')
+    if not size:
+        return job.get('stdin') or ''
+    url = core.url + '/v1/mac/jobs/' + urllib.parse.quote(job['id']) + '/stdin?device=' + urllib.parse.quote(device)
+    for _ in range(3):
+        try:
+            with NET['opener'].open(urllib.request.Request(url, headers=core.headers), timeout=MAC_POST_SECONDS) as response:
+                data = response.read(size + 1)
+            if len(data) == size:
+                return data.hex()
+        except urllib.error.HTTPError as error:
+            error.close()
+            return None  # Core already gave up on this job.
+        except (OSError, http.client.HTTPException):
+            pass
+        time.sleep(1)
+    return None
 
 
 def mac_level(config):
@@ -794,7 +818,7 @@ class MacJobs:
         delay = 2
         while core.key in self.wanted:
             try:
-                request = urllib.request.Request(core.url + '/v1/mac/jobs?device=' + device,
+                request = urllib.request.Request(core.url + '/v1/mac/jobs?device=' + device + '&boot=' + MAC_BOOT + '&fetch=true',
                                                  headers={**core.headers, 'Accept': 'text/event-stream'})
                 with NET['opener'].open(request, timeout=60) as stream:
                     delay, event = 2, None
@@ -839,7 +863,10 @@ class MacJobs:
                 time.sleep(1)
         result = {'state': 'done', 'code': 127, 'stdout': '', 'stderr': '', 'truncated': False}
         # Core may have taken a confirmation whose reply was lost, so it still gets this result instead of waiting forever.
-        refused = self.refusal(core, job) if confirmed else 'The Mac could not confirm this command with the cloud, so it did not run. Try again.'
+        job['stdin'] = mac_stdin(core, device, job) if confirmed else ''
+        refused = ('The Mac could not confirm this command with the cloud, so it did not run. Try again.' if not confirmed else
+                   "The Mac could not download this command's input from the cloud, so it did not run. Try again." if job['stdin'] is None else
+                   self.refusal(core, job))
         sandboxed = not refused and not job.get('write') and mac_level(self.enabled() or {}) != 'full'
         login = pwd.getpwuid(os.getuid()).pw_shell or '/bin/zsh'
         # Cloudroom's own tools (browser-harness) come first, as in Local threads, after the user's profile sets PATH.

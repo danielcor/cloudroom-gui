@@ -30,6 +30,15 @@ const IDLE_STOP_MS = 2 * 60_000;
 
 type Paths = ExperimentalHostRpcContext["experimental_paths"];
 
+// GNOME on Wayland hides app windows from Cua until its WinRects extension is on.
+function isGnomeWayland() {
+  return (
+    process.platform === "linux" &&
+    process.env.XDG_SESSION_TYPE === "wayland" &&
+    /gnome/i.test(process.env.XDG_CURRENT_DESKTOP ?? "")
+  );
+}
+
 function driverEnv(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -68,7 +77,8 @@ async function install(dir: string, signal: AbortSignal) {
     await pipeline(Readable.fromWeb(response.body as never), createWriteStream(archive));
     if ((await sha256(archive)) !== asset.sha256)
       throw new Error("Cua Driver download failed its checksum; nothing was installed");
-    await run("tar", ["-xzf", archive, "-C", stage, "cua-driver"], { signal });
+    const extra = process.platform === "linux" ? ["wayland-helper"] : [];
+    await run("tar", ["-xzf", archive, "-C", stage, "cua-driver", ...extra], { signal });
     const binary = join(stage, "cua-driver");
     if (process.platform === "darwin") {
       await run("/usr/bin/codesign", ["--verify", "--strict", binary], { signal });
@@ -175,6 +185,13 @@ export function createHostEntry() {
     return null;
   }
 
+  async function waylandHint() {
+    if (!paths || !isGnomeWayland()) return null;
+    const { stdout } = await run("gnome-extensions", ["info", "winrects@cua"], { timeout: 5_000 }).catch(() => ({ stdout: "" }));
+    if (/State:\s*(ACTIVE|ENABLED)/.test(stdout)) return null;
+    return `GNOME on Wayland hides app windows until the "cua WinRects" GNOME extension is on. With the user's OK, run ${join(dir(), "wayland-helper", "install.sh")} (no sudo needed), then ask them to log out and back in once.`;
+  }
+
   async function status(): Promise<HostStatus> {
     const reason = unsupported();
     return {
@@ -185,13 +202,15 @@ export function createHostEntry() {
       installed: paths !== null && (await exists(join(dir(), "verified.json"))),
       running: daemon !== null && daemon.exitCode === null,
       permissions: await readPermissions().catch(() => ({ accessibility: null, screenRecording: null })),
+      hint: await waylandHint(),
     };
   }
 
   async function ensureInstalled(signal: AbortSignal) {
     if (verified) return;
     const record = join(dir(), "verified.json");
-    if (await exists(record)) {
+    const helperMissing = isGnomeWayland() && !(await exists(join(dir(), "wayland-helper")));
+    if (!helperMissing && (await exists(record))) {
       const expected = (JSON.parse(await readFile(record, "utf8")) as { sha256: string }).sha256;
       if ((await sha256(binary()).catch(() => "")) === expected) {
         verified = true;

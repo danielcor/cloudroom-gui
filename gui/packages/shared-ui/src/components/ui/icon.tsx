@@ -24,9 +24,7 @@ import {
   ComputerTerminal01Icon,
   Copy01Icon,
   DashedLineCircleIcon,
-  Delete02Icon,
   Download01Icon,
-  Edit02Icon,
   FilterHorizontalIcon,
   FolderAddIcon,
   FolderExportIcon,
@@ -62,11 +60,13 @@ import {
   subscribeExtendedIcons,
 } from "./icon-registry";
 import {
+  SoftEditIcon,
   SoftFolderIcon,
   SoftMoreIcon,
   SoftNewThreadIcon,
   SoftSendIcon,
   SoftSettingsIcon,
+  SoftTrashIcon,
 } from "./icon-soft";
 
 const SectionAddStrokeRoundedIcon: IconSvgElement = [
@@ -132,7 +132,7 @@ const CORE_ICON_MAP = {
   ComputerTerminal01: ComputerTerminal01Icon,
   Copy: Copy01Icon,
   Download: Download01Icon,
-  Edit: Edit02Icon,
+  Edit: SoftEditIcon,
   FilterHorizontal: FilterHorizontalIcon,
   Folder: SoftFolderIcon,
   FolderExport: FolderExportIcon,
@@ -160,7 +160,7 @@ const CORE_ICON_MAP = {
   Terminal: ComputerTerminal01Icon,
   Toolbox: ToolboxIcon,
   ToolCase: ToolCaseIcon,
-  Trash2: Delete02Icon,
+  Trash2: SoftTrashIcon,
   Unavailable: UnavailableIcon,
   UserRoundPlus: UserAdd01Icon,
   Workflow: WorkflowCircle03Icon,

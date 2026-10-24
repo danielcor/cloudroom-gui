@@ -35,6 +35,7 @@ come back as `screenshot_file` paths; read them with your image tool.
 - `app_denied`: stop using that app. Ask the user what to do instead.
 - `app_busy`: another thread is driving that app. Wait or pick another app.
 - `permissions_missing`: Cloudroom lacks macOS Accessibility. Ask the user to click Grant in Settings > Plugins > Computer Use, or run `setup` while they watch, then retry.
+- Linux Wayland: if `list_windows` is empty for a running app, read `hint` in `status` and follow it. Never `launch_app` an app that's already running; that opens a second, empty copy.
 - Discovery (`list_apps`, `list_windows`, `get_screen_size`) needs no approval. Input tools must pass the target's `pid`.
 
 ## The loop: observe, act once, verify

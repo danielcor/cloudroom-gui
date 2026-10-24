@@ -145,6 +145,7 @@ function ComputerUseSettings() {
               ? `Cua Driver ${status.version} · ${status.installed ? "installed" : "downloads on first use"} · ${status.running ? "running" : "idle"}`
               : status.reason}
           </p>
+          {status.hint ? <p className="text-xs text-muted-foreground">{status.hint}</p> : null}
           {status.platform === "darwin" ? <PermissionRows permissions={status.permissions} onChange={setSettings} /> : null}
           <Button size="sm" variant="ghost" onClick={() => void load(rpc.call("restart", null))}>
             Restart driver

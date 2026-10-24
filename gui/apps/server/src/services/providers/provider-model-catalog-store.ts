@@ -330,6 +330,25 @@ export function createProviderModelCatalogStore(options: {
     pendingPushByHost.set(hostId, timer);
   }
 
+  function markProviderEntriesStale(
+    hostId: string,
+    providerId: string,
+    except: CatalogEntry | null,
+  ): boolean {
+    let marked = false;
+    for (const entry of entries.values()) {
+      if (
+        entry !== except &&
+        entry.key.hostId === hostId &&
+        entry.key.providerId === providerId
+      ) {
+        markStale(entry);
+        marked = true;
+      }
+    }
+    return marked;
+  }
+
   function persistGood(
     deps: WorkSessionDeps,
     key: ProviderModelCatalogRowKey,
@@ -535,6 +554,15 @@ export function createProviderModelCatalogStore(options: {
         ) {
           return { kind: "error", code: entry.failure?.code ?? "failed" };
         }
+        if (
+          markProviderEntriesStale(
+            entry.key.hostId,
+            entry.key.providerId,
+            entry,
+          )
+        ) {
+          schedulePush(deps, entry.key.hostId);
+        }
         return {
           kind: "catalog",
           models: entry.good.models,
@@ -588,14 +616,7 @@ export function createProviderModelCatalogStore(options: {
     },
 
     markProviderStale(hostId, providerId) {
-      for (const entry of entries.values()) {
-        if (
-          entry.key.hostId === hostId &&
-          entry.key.providerId === providerId
-        ) {
-          markStale(entry);
-        }
-      }
+      markProviderEntriesStale(hostId, providerId, null);
     },
 
     markAllStale() {

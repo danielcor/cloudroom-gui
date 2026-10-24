@@ -156,6 +156,14 @@ function messageContextLine(label: string): string {
   return `<context> ${label} </context>`;
 }
 
+function messageContextLabel(
+  text: string,
+  messageNumber: number | null,
+): string {
+  const words = countWords(text);
+  return `[message${messageNumber === null ? "" : ` #${messageNumber}`} - ${words} ${words === 1 ? "word" : "words"}]`;
+}
+
 /**
  * Adds a chat message as a short `<context> [message #7 - 494 words] </context>`
  * line. The full text is kept in `contexts` and swapped in on send.
@@ -169,8 +177,7 @@ export function appendMessageContextToDraft(
   const text = messageText.trim();
   if (text === "") return appendAttachmentsToDraft(state, attachments);
 
-  const words = countWords(text);
-  const label = `[message${messageNumber === null ? "" : ` #${messageNumber}`} - ${words} ${words === 1 ? "word" : "words"}]`;
+  const label = messageContextLabel(text, messageNumber);
   const separator =
     state.text === "" || state.text.endsWith("\n") ? "" : "\n\n";
   const contexts = (state.contexts ?? []).filter(
@@ -184,6 +191,33 @@ export function appendMessageContextToDraft(
     },
     attachments,
   );
+}
+
+/** Adds the number to a context that was added before its message number was known. */
+export function numberMessageContextInDraft(
+  state: PromptDraftState,
+  messageText: string,
+  messageNumber: number,
+): PromptDraftState {
+  const text = messageText.trim();
+  const oldLabel = messageContextLabel(text, null);
+  const label = messageContextLabel(text, messageNumber);
+  const contexts = state.contexts ?? [];
+  if (!contexts.some((context) => context.label === oldLabel)) return state;
+  return {
+    ...state,
+    text: state.text.replaceAll(
+      messageContextLine(oldLabel),
+      messageContextLine(label),
+    ),
+    contexts: contexts.flatMap((context) =>
+      context.label === label
+        ? []
+        : context.label === oldLabel
+          ? [{ label, text: context.text }]
+          : [context],
+    ),
+  };
 }
 
 export function isPromptDraftEmpty(draft: PromptDraftState): boolean {

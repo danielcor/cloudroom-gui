@@ -270,9 +270,10 @@ interface MarkdownCodeRendererProps extends MarkdownCodeProps {
 }
 type MarkdownHeadingProps = ComponentPropsWithoutRef<"h1"> & ExtraProps;
 type MarkdownHrProps = ComponentPropsWithoutRef<"hr"> & ExtraProps;
-type MarkdownImageProps = ComponentPropsWithoutRef<"img"> & ExtraProps & {
-  "data-markdown-image-offset"?: number;
-};
+type MarkdownImageProps = ComponentPropsWithoutRef<"img"> &
+  ExtraProps & {
+    "data-markdown-image-offset"?: number;
+  };
 type MarkdownImageRenderAttributes = Omit<
   MarkdownImageProps,
   "alt" | "children" | "className" | "node" | "src"
@@ -947,13 +948,23 @@ function MarkdownUnorderedList({ children }: MarkdownUnorderedListProps) {
 function MarkdownOrderedList({
   children,
   className: _className,
-  node: _node,
+  node,
   ...orderedListProps
 }: MarkdownOrderedListProps) {
+  // Outside markers grow left, so widen the gutter for "10." and up.
+  const itemCount =
+    node?.children.filter((child) => child.type === "element").length ?? 0;
+  const lastNumber = (orderedListProps.start ?? 1) + Math.max(itemCount, 1) - 1;
+  const extraDigits = Math.max(String(lastNumber).length - 1, 0);
   return (
     <ol
       {...orderedListProps}
       className="mb-2 list-decimal pl-5 text-foreground"
+      style={
+        extraDigits > 0
+          ? { paddingLeft: `calc(1.25rem + ${extraDigits}ch)` }
+          : undefined
+      }
     >
       {children}
     </ol>
@@ -989,7 +1000,9 @@ function markdownHastTableRows(node: MarkdownHastNode | undefined): string[][] {
   return (node.children ?? []).flatMap(markdownHastTableRows);
 }
 
-function previousMarkdownHeadingText(element: HTMLElement | null): string | null {
+function previousMarkdownHeadingText(
+  element: HTMLElement | null,
+): string | null {
   let sibling = element?.previousElementSibling ?? null;
   for (let step = 0; sibling !== null && step < 4; step += 1) {
     if (/^H[1-6]$/u.test(sibling.tagName)) {
@@ -1066,7 +1079,8 @@ function MarkdownTableScroller({ children }: { children: ReactNode }) {
     const observer =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(scroller);
-    if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
+    if (scroller.firstElementChild)
+      observer?.observe(scroller.firstElementChild);
     return () => {
       scroller.removeEventListener("scroll", update);
       observer?.disconnect();
@@ -1223,7 +1237,8 @@ function MarkdownRenderedImage({
     <img
       {...imageAttributes}
       ref={(element) => {
-        if (element?.complete && element.naturalWidth > 0) setLoadedUrl(imageUrl);
+        if (element?.complete && element.naturalWidth > 0)
+          setLoadedUrl(imageUrl);
       }}
       onLoad={() => setLoadedUrl(imageUrl)}
       onError={() => setLoadedUrl(imageUrl)}

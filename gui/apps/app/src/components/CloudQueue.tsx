@@ -78,8 +78,8 @@ export function PlanCard() {
           </div>
         );
       })}
-      <Button type="button" size="sm" variant={pro ? "outline" : "default"} className="mt-3 w-full" onClick={() => openUpgrade("plan_card")}>
-        {pro ? "Get 3× more with Super" : "Get 10× more with Pro"}<span className="ml-auto font-normal opacity-70">{pro ? "$150/mo" : "$50/mo"}</span><Icon name="ArrowRight" aria-hidden />
+      <Button type="button" size="sm" variant={pro ? "outline" : "default"} className="mt-3 w-full justify-start" onClick={() => openUpgrade("plan_card")}>
+        <span className="min-w-0 truncate">{pro ? "Get 3× more with Super" : "Get 10× more with Pro"}</span><span className="ml-auto shrink-0 font-normal opacity-70">{pro ? "$150/mo" : "$50/mo"}</span><Icon name="ArrowRight" aria-hidden />
       </Button>
     </section>
   );

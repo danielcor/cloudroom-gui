@@ -102,3 +102,26 @@ export const SoftSendIcon: IconSvgElement = [
     },
   ],
 ];
+
+export const SoftSendNowIcon: IconSvgElement = [
+  ["circle", { cx: 12, cy: 12, r: 9.25, ...STROKE, key: "0" }],
+  path("M12 16.5V7.75M8 11.5l4-3.75 4 3.75", "1"),
+];
+
+export const SoftEditIcon: IconSvgElement = [
+  path(
+    "M15.81 5.01a2.25 2.25 0 0 1 3.18 3.18L8 19.19l-3.12.63Q4 20 4.18 19.12l.63-3.12z",
+    "0",
+  ),
+  path("M13.4 7.41l3.19 3.19", "1"),
+  path("M13.5 20h6.5", "2"),
+];
+
+export const SoftTrashIcon: IconSvgElement = [
+  path("M3.75 6.5h16.5", "0"),
+  path("M9 6.5a3 3 0 0 1 6 0", "1"),
+  path(
+    "M5.75 6.5l1 11.75a3 3 0 0 0 3 2.75h4.5a3 3 0 0 0 3-2.75l1-11.75",
+    "2",
+  ),
+];

@@ -39,6 +39,7 @@ const rpcMethods = [
   "automations_link_thread",
   "cloud_automations",
   "cloud_template_add",
+  "account_plan",
 ].sort();
 
 function project(projectId = PROJECT_ID) {

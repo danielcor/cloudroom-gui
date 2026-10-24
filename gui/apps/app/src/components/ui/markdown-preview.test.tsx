@@ -53,6 +53,24 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector("ol")?.getAttribute("start")).toBe("2");
   });
 
+  it("widens the ordered list gutter for two-digit numbers", () => {
+    const { container } = render(
+      <MarkdownPreview
+        content={"1. One\n\nText\n\n20. Twenty\n\nText\n\n9. Nine\n10. Ten"}
+      />,
+    );
+    const paddings = Array.from(
+      container.querySelectorAll("ol"),
+      (list) => list.style.paddingLeft,
+    );
+
+    expect(paddings).toEqual([
+      "",
+      "calc(1ch + 1.25rem)",
+      "calc(1ch + 1.25rem)",
+    ]);
+  });
+
   it("HTML-escapes fenced code so it cannot inject markup", () => {
     const { container } = render(
       <MarkdownPreview

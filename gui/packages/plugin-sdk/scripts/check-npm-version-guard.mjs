@@ -1,13 +1,13 @@
 // Keeps npm from lagging the plugin SDK.
 //
-// The publish job (.github/workflows/publish-bb-app.yml, job publish-plugin-sdk)
-// only publishes @get-bb/plugin-sdk when PLUGIN_SDK_VERSION is absent from npm.
-// That is safe exactly as long as a released version's *published content* never
-// changes underneath it. Declarations alone are not enough: a runtime-only change
-// (dist/ output, an exports map entry, a peer range) leaves bundled-types
-// identical, so a types-only guard would pass and publish-if-missing would then
-// never ship it — npm would keep serving stale executable code under a version
-// that no longer matches this repo.
+// npm never republishes a version, so @get-bb/plugin-sdk ships only when
+// PLUGIN_SDK_VERSION is absent from npm. That is safe exactly as long as a
+// released version's *published content* never changes underneath it.
+// Declarations alone are not enough: a runtime-only change (dist/ output, an
+// exports map entry, a peer range) leaves bundled-types identical, so a
+// types-only guard would pass and publish-if-missing would then never ship it —
+// npm would keep serving stale executable code under a version that no longer
+// matches this repo.
 //
 // So this guard compares the whole would-be-published package against the
 // published tarball for the current version:
@@ -233,11 +233,9 @@ function extractTarball(tarballPath, workDir) {
  * Build the package and pack it exactly as npm publish would, so the comparison
  * covers dist/ and the manifest, not just the declarations.
  *
- * The build runs through turbo so upstream `^build` dependencies are honored. In
- * CI it is a cache hit: ci.yml already runs `turbo run build typecheck lint`
- * before this guard, and publish-bb-app.yml builds the SDK before publishing.
- * `npm pack --ignore-scripts` then packs that freshly built tree without
- * re-running prepack.
+ * The build runs through turbo so upstream `^build` dependencies are honored and
+ * an unchanged SDK is a cache hit. `npm pack --ignore-scripts` then packs that
+ * freshly built tree without re-running prepack.
  */
 function loadLocalPackage() {
   try {

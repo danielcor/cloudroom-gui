@@ -76,12 +76,15 @@ export async function replaceWebhookUrl(
 
 export function useCloudAutomations(): {
   rows: CloudAutomation[];
+  loaded: boolean;
   actions: CloudAutomationActions;
   reload: () => Promise<void>;
 } {
   const rpc = useRpc<typeof automationRpcContract>();
   const navigate = useBbNavigate();
   const [rows, setRows] = useState<CloudAutomation[]>([]);
+  // True once the last list request succeeded, so an empty list means no Cloud loops.
+  const [loaded, setLoaded] = useState(false);
   const call = useCallback(
     (request: Request) => rpc.call("cloud_automations", request),
     [rpc],
@@ -89,11 +92,16 @@ export function useCloudAutomations(): {
   const load = useCallback(
     () =>
       call({ action: "list" }).then(
-        (value) =>
+        (value) => {
           setRows(
             (value as { automations?: CloudAutomation[] }).automations ?? [],
-          ),
-        () => setRows([]),
+          );
+          setLoaded(true);
+        },
+        () => {
+          setRows([]);
+          setLoaded(false);
+        },
       ),
     [call],
   );
@@ -146,5 +154,5 @@ export function useCloudAutomations(): {
     }),
     [act, call, load, navigate],
   );
-  return { rows, actions, reload: load };
+  return { rows, loaded, actions, reload: load };
 }

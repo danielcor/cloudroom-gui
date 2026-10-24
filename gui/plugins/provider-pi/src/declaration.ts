@@ -12,6 +12,7 @@ export function piProviderDeclaration(): PluginProviderDeclaration {
       installUrl: "https://pi.dev",
       iconTint: { light: "#6D5DFB", dark: "#6D5DFB" },
     },
+    experimental_modelDiscoveryRestart: true,
     maintenance: { health: true, usage: false, installation: true },
     env: { passthrough: ["BB_PI_BRIDGE_COMMAND", "BB_PI_BRIDGE_ARGS"] },
     capabilities: {

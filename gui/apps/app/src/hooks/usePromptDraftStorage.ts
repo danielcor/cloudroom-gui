@@ -11,6 +11,7 @@ import {
   arePromptDraftStatesEqual,
   emptyPromptDraftState,
   isPromptDraftEmpty,
+  numberMessageContextInDraft,
   parsePromptDraftStorage,
   serializePromptDraftStorage,
 } from "@cloudroom/client-core";
@@ -250,6 +251,16 @@ function addQuoteToPromptDraft(
   }
 
   writePromptDraft(storageKey, nextDraft);
+  void source?.pendingMessageNumber?.then((messageNumber) => {
+    if (messageNumber === null) return;
+    const draft = readPromptDraft(storageKey);
+    const numberedDraft = numberMessageContextInDraft(
+      draft,
+      text,
+      messageNumber,
+    );
+    if (numberedDraft !== draft) writePromptDraft(storageKey, numberedDraft);
+  });
 }
 
 function getPromptDraftStorageKey(scope: PromptDraftScope): string {

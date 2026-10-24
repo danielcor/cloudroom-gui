@@ -1156,6 +1156,7 @@ export class RuntimeManager {
         if (
           runtime &&
           this.providerMaintenanceRuntime === runtime &&
+          this.providerMaintenanceActiveRequests === 0 &&
           runtime.listRunningProviders().length === 0
         ) {
           this.providerMaintenanceRuntime = null;

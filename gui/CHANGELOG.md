@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 121
+
+Steadier Mac access, smaller app (2026-10-24)
+
+### Changes
+
+- The app is about 110 MB smaller.
+- Include context fills the composer instantly, even in very long threads.
+- Big Mac access uploads no longer hold up other jobs.
+- Mac-to-Mac opens this Mac if the other one does not load within 20 seconds.
+- Cloud threads show the real error when the agent has crashed, instead of "sent".
+- The GitHub plugin keeps syncing when gh is slow.
+- Security fixes.
+
 ## 120
 
 Faster threads and replies (2026-10-23)

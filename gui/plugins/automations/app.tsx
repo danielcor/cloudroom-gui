@@ -477,8 +477,20 @@ function DeleteAutomationDialog({
 function useTemplates(onAdded: () => void): LoopTemplatesState {
   const rpc = useRpc<typeof automationRpcContract>();
   const sdk = useSdk();
+  const navigate = useBbNavigate();
   const { providers } = useProviders();
   const [projects, setProjects] = useState<TemplateProject[] | null>(null);
+  const [plan, setPlan] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    rpc.call("account_plan", null).then(
+      (result) => !cancelled && setPlan(result.plan),
+      () => !cancelled && setPlan(null),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc]);
   useEffect(() => {
     let cancelled = false;
     sdk.projects.list().then(
@@ -568,7 +580,16 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
     },
     [providers, rpc, sdk, onAdded],
   );
-  return { projects, onAdd };
+  const onUpgrade = useCallback(
+    () => navigate.openUrl("https://www.cloudroom.dev/billing"),
+    [navigate],
+  );
+  return {
+    projects,
+    onAdd,
+    locked: plan === undefined ? null : plan === "free",
+    onUpgrade,
+  };
 }
 
 function OverviewView({

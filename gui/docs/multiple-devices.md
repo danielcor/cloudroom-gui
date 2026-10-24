@@ -137,6 +137,10 @@ The app remembers the pick and opens that Mac on every launch. If it doesn't
 answer, the app keeps trying for 30 seconds, then opens this Mac instead and
 shows a banner. When the other Mac comes back online, the banner offers Switch.
 
+The sign-in to the other Mac lasts 30 days. The app renews it a week early. If
+the other Mac answers "Sign in required" (for example after Sign out all phones),
+the app gets a new sign-in and reloads. If that fails, it reopens the Mac.
+
 The app keeps this Mac's Connect key, encrypted with the OS keychain, so it can
 open another Mac without starting its own server. It gets the key from the local
 server once, and again if the relay rejects it.

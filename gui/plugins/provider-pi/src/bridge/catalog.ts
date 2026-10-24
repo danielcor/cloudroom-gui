@@ -1,5 +1,8 @@
 import type { AvailableModel } from "@get-bb/plugin-sdk/provider-bridge";
-import { resolve } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createPiModelContextWindowResolverFrom,
   type PiModelContextWindowResolver,
@@ -84,6 +87,58 @@ export interface PiCatalog {
 
 const catalogsByCwd = new Map<string, Promise<PiCatalog>>();
 
+function windowsShellPath(path: string): string {
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    return path;
+  }
+  const match = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i.exec(path);
+  const drive = match?.[1];
+  return drive === undefined
+    ? path
+    : `${drive.toUpperCase()}:\\${match?.[2]?.replaceAll("/", "\\") ?? ""}`;
+}
+
+function piAgentDir(env: NodeJS.ProcessEnv): string {
+  let configured = env.PI_CODING_AGENT_DIR;
+  if (!configured) {
+    return join(homedir(), ".pi", "agent");
+  }
+  if (process.platform === "win32") {
+    configured = windowsShellPath(configured);
+  }
+  if (configured === "~") {
+    return homedir();
+  }
+  if (
+    configured.startsWith("~/") ||
+    (process.platform === "win32" && configured.startsWith("~\\"))
+  ) {
+    return join(homedir(), configured.slice(2));
+  }
+  return configured.startsWith("file://")
+    ? fileURLToPath(configured)
+    : configured;
+}
+
+function piModelsFilePath(cwd: string, env: NodeJS.ProcessEnv): string {
+  const modelsPath = join(piAgentDir(env), "models.json");
+  try {
+    return resolve(realpathSync(cwd), modelsPath);
+  } catch {
+    return resolve(cwd, modelsPath);
+  }
+}
+
+function fileStamp(path: string): string | null {
+  try {
+    const stats = statSync(path);
+    return `${stats.size}:${stats.mtimeMs}`;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : null;
+  }
+}
+
 async function spawnCatalog(
   cwd: string,
   extensionPath: string,
@@ -92,13 +147,25 @@ async function spawnCatalog(
   interface CatalogChildGeneration {
     child: PiRpcChild;
     ready: Promise<Record<string, unknown>>;
+    modelsPath: string;
+    modelsStamp: string | null;
     getModelScope():
       | { scopedModelIds: string[]; defaultModelId?: string }
       | undefined;
   }
 
   let generation: CatalogChildGeneration | null = null;
+  let closed = false;
+  const retire = (active: CatalogChildGeneration): void => {
+    if (generation === active) {
+      generation = null;
+    }
+    active.child.kill();
+  };
   const spawnGeneration = (): CatalogChildGeneration => {
+    const env = buildPiChildEnv({});
+    const modelsPath = piModelsFilePath(cwd, env);
+    const modelsStamp = fileStamp(modelsPath);
     let modelScope:
       | { scopedModelIds: string[]; defaultModelId?: string }
       | undefined;
@@ -119,7 +186,7 @@ async function spawnCatalog(
     };
     const child = new PiRpcChild({
       cwd,
-      env: buildPiChildEnv({}),
+      env,
       args: ["--mode", "rpc", "--no-session", "--extension", extensionPath],
       onEvent: () => {},
       onChannelMessage: (message) => {
@@ -138,31 +205,57 @@ async function spawnCatalog(
           settleModelScopeRequest = undefined;
         }
       },
-      onExit: () => {},
+      onExit: () => {
+        settleModelScopeRequest?.();
+        settleModelScopeRequest = undefined;
+      },
       recordThreadId: null,
     });
     const ready = (async (): Promise<Record<string, unknown>> => {
       const data = await child.requestOk({ type: "get_state" });
-      await new Promise<void>((resolveScope) => {
-        const timeout = setTimeout(resolveScope, 2_000);
-        timeout.unref?.();
-        settleModelScopeRequest = () => {
-          clearTimeout(timeout);
-          resolveScope();
-        };
-        child.sendChannel({
-          kind: "request",
-          id: "catalog-model-scope",
-          method: "model-scope",
+      if (!child.exited) {
+        await new Promise<void>((resolveScope) => {
+          const timeout = setTimeout(resolveScope, 2_000);
+          timeout.unref?.();
+          settleModelScopeRequest = () => {
+            clearTimeout(timeout);
+            resolveScope();
+          };
+          child.sendChannel({
+            kind: "request",
+            id: "catalog-model-scope",
+            method: "model-scope",
+          });
         });
-      });
+      }
       return typeof data === "object" && data !== null
         ? (data as Record<string, unknown>)
         : {};
     })();
-    return { child, ready, getModelScope: () => modelScope };
+    const spawned: CatalogChildGeneration = {
+      child,
+      ready,
+      modelsPath,
+      modelsStamp,
+      getModelScope: () => modelScope,
+    };
+    ready.catch((error: unknown) => {
+      if (!(error instanceof PiRpcChildExitedError)) {
+        retire(spawned);
+      }
+    });
+    return spawned;
   };
   const activeGeneration = (): CatalogChildGeneration => {
+    if (closed) {
+      throw new Error("Pi model catalog is closed");
+    }
+    if (generation !== null && !generation.child.exited) {
+      const stamp = fileStamp(generation.modelsPath);
+      if (stamp !== null && stamp !== generation.modelsStamp) {
+        retire(generation);
+      }
+    }
     if (generation === null || generation.child.exited) {
       generation = spawnGeneration();
     }
@@ -172,10 +265,20 @@ async function spawnCatalog(
     active: CatalogChildGeneration,
   ): Promise<PiRpcModel[]> => {
     await active.ready;
-    const data = (await active.child.requestOk({
-      type: "get_available_models",
-    })) as { models?: unknown[] } | undefined;
-    touch();
+    let data: { models?: unknown[] } | undefined;
+    try {
+      data = (await active.child.requestOk({
+        type: "get_available_models",
+      })) as { models?: unknown[] } | undefined;
+    } catch (error) {
+      if (!(error instanceof PiRpcChildExitedError)) {
+        retire(active);
+      }
+      throw error;
+    }
+    if (!closed) {
+      touch();
+    }
     const models = (data?.models ?? []).filter(
       (entry): entry is PiRpcModel =>
         typeof entry === "object" && entry !== null,
@@ -186,25 +289,40 @@ async function spawnCatalog(
     }
     return models;
   };
+  const withGeneration = async <T>(
+    run: (active: CatalogChildGeneration) => Promise<T>,
+    retryOwnExit: boolean,
+  ): Promise<{ active: CatalogChildGeneration; value: T }> => {
+    let active = activeGeneration();
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return { active, value: await run(active) };
+      } catch (error) {
+        if (
+          !(error instanceof PiRpcChildExitedError) ||
+          attempt === 3 ||
+          (generation === active && !(retryOwnExit && attempt === 0))
+        ) {
+          throw error;
+        }
+        active = activeGeneration();
+      }
+    }
+  };
   const fetchGeneration = async (): Promise<{
     active: CatalogChildGeneration;
     raw: PiRpcModel[];
   }> => {
-    const first = activeGeneration();
-    try {
-      return { active: first, raw: await fetchRawFrom(first) };
-    } catch (error) {
-      if (!(error instanceof PiRpcChildExitedError)) {
-        throw error;
-      }
-      const active = activeGeneration();
-      return { active, raw: await fetchRawFrom(active) };
+    if (!closed) {
+      touch();
     }
+    const { active, value } = await withGeneration(fetchRawFrom, true);
+    return { active, raw: value };
   };
   const fetchRaw = async (): Promise<PiRpcModel[]> =>
     (await fetchGeneration()).raw;
   const probe = async (): Promise<Record<string, unknown>> =>
-    activeGeneration().ready;
+    (await withGeneration((active) => active.ready, false)).value;
   await probe();
   return {
     async listModels() {
@@ -230,6 +348,7 @@ async function spawnCatalog(
     rawModels: fetchRaw,
     probe,
     async close() {
+      closed = true;
       const activeChild = generation?.child;
       if (activeChild === undefined) return;
       activeChild.kill();

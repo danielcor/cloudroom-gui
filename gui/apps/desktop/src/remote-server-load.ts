@@ -29,7 +29,7 @@ export function describeServerUrl(serverUrl: string): string {
 
 function formatLoadFailure(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return ELECTRON_LOAD_ERROR_CODE.exec(message)?.[0] ?? "the page load failed";
+  return ELECTRON_LOAD_ERROR_CODE.exec(message)?.[0] ?? (message || "the page load failed");
 }
 
 export async function loadRemoteServerPage(

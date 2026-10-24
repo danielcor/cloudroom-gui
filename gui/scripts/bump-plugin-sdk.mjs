@@ -8,12 +8,10 @@ import {
 //   packages/domain/src/plugin-sdk-version.ts  (PLUGIN_SDK_VERSION)
 //   packages/plugin-sdk/package.json           (version)
 //
-// The publish job is publish-if-missing (.github/workflows/publish-bb-app.yml,
-// job publish-plugin-sdk): it never republishes a version that already exists on
-// npm. So any change to the package's published content — dist/, bundled-types/,
-// README.md, or a consumer-facing manifest field — needs a new version, or npm
-// keeps serving the old content forever. check-npm-version-guard.mjs fails CI
-// when that happens and points here.
+// npm never republishes a version that already exists. So any change to the
+// package's published content — dist/, bundled-types/, README.md, or a
+// consumer-facing manifest field — needs a new version, or npm keeps serving the
+// old content forever. check-npm-version-guard.mjs catches that and points here.
 //
 // Both files are written atomically: a temp file per target, then renames, with
 // the originals restored if any rename fails. A half-applied bump would leave

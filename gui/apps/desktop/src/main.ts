@@ -95,13 +95,16 @@ import {
   fetchRelayCredential,
   isRelayUrl,
   listComputers,
+  createRelaySessionKeeper,
   OPEN_RETRY_MS,
   openComputer,
+  RELAY_URL_PATTERN,
   relayCookieOrigins,
   RELAY_CREDENTIAL_FILE_NAME,
   type ComputerList,
   type ComputersFailure,
   type ComputersSync,
+  type RelaySessionKeeper,
 } from "./computers.js";
 import {
   createConnectCredentialCache,
@@ -364,6 +367,7 @@ let stoppingForQuit = false;
 let quitting = false;
 let serverTargetStore: ServerTargetStore | null = null;
 let computersSync: ComputersSync | null = null;
+let relaySessionKeeper: RelaySessionKeeper | null = null;
 let serverTargetGeneration = 0;
 let computerList: ComputerList | null = null;
 let computersSkipReason: ComputersFailure | null = null;
@@ -538,6 +542,14 @@ function registerApplicationRendererReloadShortcut(
       webContents.reload();
     }
   });
+}
+
+function reloadApplicationWindows(): void {
+  for (const browserWindow of BrowserWindow.getAllWindows()) {
+    if (!applicationWindowWebContentsIds.has(browserWindow.webContents.id)) continue;
+    desktopBrowserViewManager?.prepareWindowReload(browserWindow);
+    browserWindow.webContents.reload();
+  }
 }
 
 function sendDesktopInfoChanged(): void {
@@ -1172,6 +1184,7 @@ async function applyServerTarget(): Promise<void> {
   const generation = serverTargetGeneration;
   const isCurrent = (): boolean => serverTargetGeneration === generation;
   setComputerFallback(null);
+  relaySessionKeeper?.clear();
 
   if (target.kind === "custom" && new URL(target.url).hostname.endsWith(".getbb.app")) {
     desktopLogger.info(
@@ -1270,6 +1283,7 @@ async function forgetOtherMacs(): Promise<void> {
   if (remembered) origins.add(new URL(remembered.url).origin);
   if (origins.size === 0 && computerList === null && !remembered) return;
   computerList = null;
+  relaySessionKeeper?.clear();
   await Promise.all([...origins].map((origin) => session.defaultSession.clearStorageData({ origin }).catch(() => {})));
   if (await serverTargetStore?.forgetConnectServer()) void applyServerTarget();
   refreshApplicationMenu();
@@ -1289,7 +1303,11 @@ async function openRelayComputer(handle: string, isCurrent: () => boolean): Prom
     const credential = await getRelayCredential(true);
     if (credential === null || !isCurrent()) return false;
     const opened = await openComputer(credential, handle, session.defaultSession.cookies);
-    if (opened.ok) return isCurrent() && (await loadRemoteServerTarget(opened.value, isCurrent));
+    if (opened.ok) {
+      if (!isCurrent() || !(await loadRemoteServerTarget(opened.value.url, isCurrent, true))) return false;
+      relaySessionKeeper?.track(handle, opened.value);
+      return true;
+    }
     desktopLogger.info(`[desktop] could not open Mac ${handle} (${opened.reason})`);
     if (opened.reason === "unauthorized") {
       // One more try covers a key the Connect plugin replaced since this app saved it.
@@ -1317,14 +1335,31 @@ async function openComputerTarget(handle: string | null): Promise<void> {
   await applyServerTarget();
 }
 
+// Another Mac can answer the relay and then never finish loading. Give up and open this Mac instead.
+const OTHER_MAC_LOAD_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  promise.catch(() => {}); // Loading this Mac later aborts the stuck page; nobody needs that error.
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`no answer after ${ms / 1000} s`)), ms).unref();
+    }),
+  ]);
+}
+
+/** `otherMac`: one of your Macs on the relay. It gets a time limit and no error page, because the caller falls back to this Mac. */
 async function loadRemoteServerTarget(
   serverUrl: string,
   isCurrent: () => boolean,
+  otherMac = false,
 ): Promise<boolean> {
   const loaded = await loadRemoteServerPage({
     isCurrent,
-    loadStartupError,
-    loadUrl: loadWindowUrl,
+    loadStartupError: otherMac ? async () => {} : loadStartupError,
+    loadUrl: otherMac
+      ? (args) => withTimeout(loadWindowUrl(args), OTHER_MAC_LOAD_TIMEOUT_MS)
+      : loadWindowUrl,
     logWarning: (message) => {
       desktopLogger.warn(message);
     },
@@ -2379,6 +2414,27 @@ async function runDesktopApp(): Promise<void> {
   });
   relayCredential = await relayCredentialCache.read();
   thisComputerName = await computerName();
+  relaySessionKeeper = createRelaySessionKeeper({
+    async renew(handle) {
+      const credential = await getRelayCredential(false);
+      if (credential === null) return { ok: false, reason: "no-credential" };
+      return openComputer(credential, handle, session.defaultSession.cookies);
+    },
+    onRecovered() {
+      desktopLogger.info("[desktop] signed in to the other Mac again — reloading");
+      reloadApplicationWindows();
+    },
+    onLost() {
+      desktopLogger.info("[desktop] could not sign in to the other Mac again — reopening it");
+      void applyServerTarget();
+    },
+  });
+  // "Sign in required" from the Mac on screen: its sign-in expired or "Sign out all phones" ended it.
+  session.defaultSession.webRequest.onCompleted({ urls: [RELAY_URL_PATTERN] }, (details) => {
+    if (details.statusCode === 401) {
+      void relaySessionKeeper?.onSignInRequired(details.url, details.resourceType === "mainFrame");
+    }
+  });
   computersSync = createComputersSync({
     async fetchList() {
       const credential = await getRelayCredential(false);

@@ -350,11 +350,16 @@ function run(
       { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
+          const output = stderr.trim();
+          const reason = error.killed
+            ? `timed out after ${Math.round(timeoutMs / 1000)}s${output ? `: ${output}` : ""}`
+            : output || error.message;
           reject(
-            new Error(
-              `${file} ${args.slice(0, 3).join(" ")} failed: ${
-                stderr.trim() || error.message
-              }`,
+            Object.assign(
+              new Error(
+                `${file} ${args.slice(0, 3).join(" ")} failed: ${reason}`,
+              ),
+              { code: error.code },
             ),
           );
         } else {
@@ -551,17 +556,24 @@ export default async function plugin(bb: BbPluginApi) {
   type GhState = "ready" | "needs_configuration" | "unavailable";
   let ghState: GhState = "unavailable";
   let ghAuthError: string | null = "checking gh…";
+  let ghWasDown = false;
 
   async function resolveGh(): Promise<string> {
     if (ghPath !== null) return ghPath;
     const candidates = ["gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh"];
+    const failures: string[] = [];
     for (const candidate of candidates) {
       try {
         await run(candidate, ["--version"], 5_000);
         ghPath = candidate;
         return candidate;
-      } catch {}
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== "ENOENT") {
+          failures.push(errorMessage(error));
+        }
+      }
     }
+    if (failures.length > 0) throw ghUnavailable(failures.join("; "));
     throw needsConfiguration(`GitHub CLI not found. ${GH_HINT}`);
   }
 
@@ -576,11 +588,20 @@ export default async function plugin(bb: BbPluginApi) {
       await gh(["auth", "status", "--hostname", GH_HOST, "--active"], 10_000);
       ghState = "ready";
       ghAuthError = null;
+      if (ghWasDown) {
+        ghWasDown = false;
+        bb.realtime.publish("data-changed", {});
+      }
       return;
     } catch (error) {
+      ghWasDown = true;
       ghAuthError = errorMessage(error);
       if (isNeedsConfigurationError(error)) {
         ghState = "needs_configuration";
+        throw error;
+      }
+      if (isGhUnavailableError(error)) {
+        ghState = "unavailable";
         throw error;
       }
     }

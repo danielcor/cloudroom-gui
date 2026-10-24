@@ -88,7 +88,6 @@ import {
   PuzzleIcon,
   Refresh01Icon,
   SecurityCheckIcon,
-  SentIcon,
   SidebarBottomIcon,
   SidebarRightIcon,
   Sorting01Icon,
@@ -112,6 +111,7 @@ import {
   SoftLaptopIcon,
   SoftMobileIcon,
   SoftPluginsIcon,
+  SoftSendNowIcon,
   SoftUsageIcon,
 } from "./icon-soft";
 
@@ -322,7 +322,7 @@ export const EXTENDED_ICON_MAP: ExtendedIconMap = {
   SecurityCheck: SecurityCheckIcon,
   RotateCcw: Refresh01Icon,
   Rows2: LayoutTwoRowIcon,
-  Sent: SentIcon,
+  Sent: SoftSendNowIcon,
   SideChat: MessageAdd02Icon,
   Smartphone: SoftMobileIcon,
   Sort: Sorting01Icon,

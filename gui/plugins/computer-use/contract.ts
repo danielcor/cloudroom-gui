@@ -18,6 +18,7 @@ export const hostStatusSchema = z
     installed: z.boolean(),
     running: z.boolean(),
     permissions: permissionsSchema,
+    hint: z.string().nullish(),
   })
   .strict();
 export type HostStatus = z.infer<typeof hostStatusSchema>;

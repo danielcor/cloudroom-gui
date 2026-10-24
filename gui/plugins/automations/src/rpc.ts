@@ -107,6 +107,10 @@ export const automationRpcContract = defineRpcContract({
     input: cloudTemplateInputSchema,
     output: z.unknown(),
   },
+  account_plan: {
+    input: z.null(),
+    output: z.object({ plan: z.string().nullable() }).strict(),
+  },
 });
 
 type Sdk = Pick<BbPluginApi["sdk"], "cloudroom" | "threads">;
@@ -252,6 +256,10 @@ export function createRpcHandlers(service: AutomationService, sdk?: Sdk) {
         model: input.model,
         reasoning: input.reasoningLevel,
       });
+    },
+    async account_plan() {
+      const status = await sdk?.cloudroom.status().catch(() => null);
+      return { plan: status?.plan ?? null };
     },
     automations_overview() {
       return service.overview();

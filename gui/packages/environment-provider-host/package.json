@@ -9,6 +9,11 @@
       "types": "./src/git.ts",
       "default": "./src/git.ts"
     },
+    "./git-branches": {
+      "source": "./src/git-branches.ts",
+      "types": "./src/git-branches.ts",
+      "default": "./src/git-branches.ts"
+    },
     "./locks": {
       "source": "./src/locks.ts",
       "types": "./src/locks.ts",

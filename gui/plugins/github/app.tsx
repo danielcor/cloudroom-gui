@@ -2136,7 +2136,7 @@ function GithubPanelBody({
   if (status !== null && status.ghState === "unavailable") {
     return (
       <EmptyState
-        message={`GitHub CLI could not reach GitHub. Check your network or keychain; the plugin retries by itself. (${status.ghError ?? ""})`}
+        message={`GitHub CLI isn't working. Check gh, your network, or your keychain; the plugin retries by itself. (${status.ghError ?? ""})`}
       />
     );
   }

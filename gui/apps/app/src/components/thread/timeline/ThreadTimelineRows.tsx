@@ -131,7 +131,10 @@ import {
   fetchThreadConversationOutline,
   useThreadTimelineTurnSummaryDetails,
 } from "@/hooks/queries/thread-queries";
-import { type ThreadTimelineTurnSummaryDetailsQueryIdentity } from "@/hooks/queries/query-keys";
+import {
+  threadConversationOutlineQueryKey,
+  type ThreadTimelineTurnSummaryDetailsQueryIdentity,
+} from "@/hooks/queries/query-keys";
 import {
   useSenderThreadMetadataById,
   type SenderThreadMetadata,
@@ -188,10 +191,10 @@ export interface ThreadTimelineRowsProps {
   workspaceRootPath: string | undefined;
 }
 
+/** Returns the number at once when known, else a promise from the server outline. */
 type ResolveMessageNumber = (
   rowId: string,
-  onResolved: (messageNumber: number | null) => void,
-) => void;
+) => number | null | Promise<number | null>;
 
 interface TimelineRendererStaticContextValue {
   canSpawnChild: boolean;
@@ -409,17 +412,26 @@ function useMessageNumberResolver({
   const latestRef = useRef({ hasOlderTimelineRows, threadId, timelineRows });
   latestRef.current = { hasOlderTimelineRows, threadId, timelineRows };
   return useCallback(
-    (rowId, onResolved) => {
+    (rowId) => {
       const latest = latestRef.current;
       if (!latest.hasOlderTimelineRows || latest.threadId === undefined) {
         const index = latest.timelineRows
           .filter((row) => row.kind === "conversation")
           .findIndex((row) => row.id === rowId);
-        onResolved(index === -1 ? null : index + 1);
-        return;
+        return index === -1 ? null : index + 1;
       }
       const outlineThreadId = latest.threadId;
-      void fetchThreadConversationOutline(queryClient, outlineThreadId)
+      // Numbers of existing messages never change, so any cached outline that has the row is good.
+      const cachedOutline =
+        queryClient.getQueryData<ThreadConversationOutlineResponse>(
+          threadConversationOutlineQueryKey(outlineThreadId),
+        );
+      const cachedNumber =
+        cachedOutline === undefined
+          ? null
+          : outlineMessageNumber(cachedOutline, rowId);
+      if (cachedNumber !== null) return cachedNumber;
+      return fetchThreadConversationOutline(queryClient, outlineThreadId)
         .then(
           (outline) =>
             outlineMessageNumber(outline, rowId) ??
@@ -429,7 +441,7 @@ function useMessageNumberResolver({
               0,
             ).then((freshOutline) => outlineMessageNumber(freshOutline, rowId)),
         )
-        .then(onResolved, () => onResolved(null));
+        .catch(() => null);
     },
     [queryClient],
   );
@@ -441,10 +453,16 @@ function addMessageToChatHandler(
   resolveMessageNumber: ResolveMessageNumber,
 ): ThreadTimelineAddToChatHandler | undefined {
   if (handler === undefined) return undefined;
-  return (text, attachments) =>
-    resolveMessageNumber(rowId, (messageNumber) =>
-      handler(text, attachments, { messageNumber }),
+  return (text, attachments) => {
+    const messageNumber = resolveMessageNumber(rowId);
+    handler(
+      text,
+      attachments,
+      messageNumber instanceof Promise
+        ? { messageNumber: null, pendingMessageNumber: messageNumber }
+        : { messageNumber },
     );
+  };
 }
 
 function useTimelineRendererStaticContext(): TimelineRendererStaticContextValue {
@@ -2303,13 +2321,16 @@ function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
     activeSelection === null ||
     selectionSourceSeqEnd === undefined
       ? undefined
-      : () =>
-          resolveMessageNumber(activeSelection.rowId, (messageNumber) =>
+      : () => {
+          const fork = (messageNumber: number | null) =>
             onSelectionForkMessage({
               sourceSeqEnd: selectionSourceSeqEnd,
               context: { text: activeSelection.selection.text, messageNumber },
-            }),
-          );
+            });
+          const messageNumber = resolveMessageNumber(activeSelection.rowId);
+          if (messageNumber instanceof Promise) void messageNumber.then(fork);
+          else fork(messageNumber);
+        };
   const onOpenPluginPanel = props.onOpenPluginPanel;
   const selectionPluginActions = useMemo<
     readonly ThreadTimelinePluginMessageAction[]

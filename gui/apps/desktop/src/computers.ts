@@ -97,6 +97,8 @@ export async function fetchRelayCredential(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "null",
+      // A stuck local server must not hold up opening another Mac or falling back.
+      signal: AbortSignal.timeout(5_000),
     },
   ).catch(() => null);
   const body: unknown = await response?.json().catch(() => null);
@@ -165,12 +167,17 @@ export async function listComputers(
     : { ok: false, reason: "unavailable" };
 }
 
+export interface OpenedComputer {
+  url: string;
+  expiresAt: number;
+}
+
 /** Signs this app in to another of your Macs and returns the address to load. */
 export async function openComputer(
   credential: ConnectCredential,
   handle: string,
   cookies: CookieStore,
-): Promise<ComputersResult<string>> {
+): Promise<ComputersResult<OpenedComputer>> {
   const result = await callRelay(
     credential,
     "/api/computers/open",
@@ -196,7 +203,102 @@ export async function openComputer(
   } catch {
     return { ok: false, reason: "unavailable" };
   }
-  return { ok: true, value: url };
+  return { ok: true, value: { url, expiresAt: cookie.expiresAt } };
+}
+
+/** Every request to a Mac on the relay, for watching its answers. */
+export const RELAY_URL_PATTERN = `*://*.${RELAY_HOST}/*`;
+
+const RENEW_CHECK_MS = 60 * 60_000;
+// The relay's sign-in lasts 30 days. Renew with a week to spare, so a sleeping Mac never wakes up signed out.
+const RENEW_BEFORE_MS = 7 * 24 * 60 * 60_000;
+// After a recovery, the reloaded page answering "Sign in required" this soon means a new sign-in doesn't help.
+// Other requests in that window are the old page's stragglers.
+const RECOVERY_WINDOW_MS = 60_000;
+
+export interface RelaySessionKeeper {
+  track(handle: string, opened: OpenedComputer): void;
+  clear(): void;
+  renewIfExpiring(): Promise<void>;
+  onSignInRequired(url: string, page: boolean): Promise<void>;
+}
+
+/**
+ * Keeps this app signed in to the Mac on screen. It renews the sign-in before it expires, and gets a new one
+ * when the Mac answers "Sign in required" (after "Sign out all phones"). If that fails, `onLost` reopens it.
+ */
+export function createRelaySessionKeeper(args: {
+  renew: (handle: string) => Promise<ComputersResult<OpenedComputer>>;
+  onRecovered: () => void;
+  onLost: () => void;
+  now?: () => number;
+}): RelaySessionKeeper {
+  const now = args.now ?? Date.now;
+  let current: { handle: string; origin: string; expiresAt: number } | null =
+    null;
+  let recoveredAt = Number.NEGATIVE_INFINITY;
+  let renewing: Promise<boolean> | null = null;
+
+  // True when a new sign-in is in place. Calls made while one is running share it.
+  function renew(): Promise<boolean> {
+    const target = current;
+    if (target === null) return Promise.resolve(false);
+    renewing ??= args
+      .renew(target.handle)
+      .then((result) => {
+        if (!result.ok || current !== target) return false;
+        target.expiresAt = result.value.expiresAt;
+        return true;
+      })
+      .finally(() => {
+        renewing = null;
+      });
+    return renewing;
+  }
+
+  const keeper: RelaySessionKeeper = {
+    track(handle, opened) {
+      current = {
+        handle,
+        origin: new URL(opened.url).origin,
+        expiresAt: opened.expiresAt,
+      };
+      recoveredAt = Number.NEGATIVE_INFINITY;
+    },
+    clear() {
+      current = null;
+    },
+    async renewIfExpiring() {
+      if (current !== null && current.expiresAt - now() < RENEW_BEFORE_MS)
+        await renew();
+    },
+    async onSignInRequired(url, page) {
+      const target = current;
+      if (
+        target === null ||
+        renewing !== null ||
+        new URL(url).origin !== target.origin
+      )
+        return;
+      if (now() - recoveredAt < RECOVERY_WINDOW_MS) {
+        if (!page) return;
+        keeper.clear();
+        args.onLost();
+        return;
+      }
+      recoveredAt = now();
+      if (!(await renew())) {
+        if (current === target) {
+          keeper.clear();
+          args.onLost();
+        }
+        return;
+      }
+      if (current === target) args.onRecovered();
+    },
+  };
+  setInterval(() => void keeper.renewIfExpiring(), RENEW_CHECK_MS).unref();
+  return keeper;
 }
 
 export type ComputerList = z.infer<typeof listSchema>;

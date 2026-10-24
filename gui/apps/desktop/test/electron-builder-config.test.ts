@@ -385,14 +385,17 @@ describe("electron-builder signing config", () => {
     expect(config.npmRebuild).toBe(false);
   });
 
-  it("excludes source maps from packaged app files", async () => {
+  it("excludes source maps before any file set, where electron-builder keeps the order", async () => {
     const configText = await readFile(
       resolve(desktopPackageRoot, "electron-builder.config.json"),
       "utf8",
     );
     const config = electronBuilderConfigSchema.parse(JSON.parse(configText));
+    const fileSetIndex = config.files.findIndex((entry) => typeof entry !== "string");
+    const firstFileSet = fileSetIndex === -1 ? config.files.length : fileSetIndex;
 
-    expect(config.files).toContain("!**/*.map");
+    expect(config.files.indexOf("!**/*.map")).toBeGreaterThan(-1);
+    expect(config.files.indexOf("!**/*.map")).toBeLessThan(firstFileSet);
   });
 
   it("copies the app scaffold template as a dedicated file set", async () => {

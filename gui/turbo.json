@@ -518,7 +518,6 @@
       "dependsOn": ["//#ensure-native-modules", "@cloudroom/cli#build", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/.github/actions/setup-workspace/**",
         "$TURBO_ROOT$/package.json",
         "$TURBO_ROOT$/scripts/*.mjs",
         "$TURBO_ROOT$/turbo.json",

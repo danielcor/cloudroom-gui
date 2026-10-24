@@ -183,8 +183,9 @@ environment pull-request show <id>`. Diff commands require an explicit target
   answering from its last stored list. Check `room-cli machine provider-cli status MACHINE
 --json` for installed executables. Installed does not mean authenticated; a Claude
   login error requires the user to run `claude` and `/login`.
-- If Cursor's model list fails, or Codex's looks stale after a CLI upgrade,
-  `room-cli provider models acp-cursor --restart` (or `codex --restart`)
+- If Cursor's model list fails, Codex's looks stale after a CLI upgrade, or
+  Pi's after a `models.json` edit,
+  `room-cli provider models acp-cursor --restart` (or `codex`/`pi --restart`)
   restarts model discovery and reloads the list on the selected machine. It
   does not stop threads, reinstall the CLI, or change credentials.
 - Top-level `customModels` in the same `config.json` registers extra picker

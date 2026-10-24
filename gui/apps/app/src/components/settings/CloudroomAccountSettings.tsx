@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@cloudroom/shared-ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@cloudroom/shared-ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@cloudroom/shared-ui/dropdown-menu";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { SETTINGS_CARD_CLASS, SETTINGS_CARD_ROW_CLASS, SettingsSection } from "@/components/ui/settings-section";
@@ -10,6 +10,7 @@ import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
 import { useCloudroomAccount } from "@/hooks/queries/cloudroom-queries";
 import { MacAccessMenuItems, useMacAccessLevel } from "@/components/sidebar/MacAccessChip";
 import { FixPrompt } from "@/components/ui/fix-prompt";
+import { ConfirmDeleteDialog, ConfirmDeleteDialogContent } from "@/components/dialogs/ConfirmDeleteDialog";
 import { cloudUnavailableFixPrompt, syncFixPrompt } from "@/lib/fix-prompts";
 import { SelfHostedCoreForm } from "./SelfHostedCoreForm";
 
@@ -138,20 +139,24 @@ function MacAccessRow() {
   </div>;
 }
 
-// Bottom of the Machines page. The menu step keeps sign-out from being a single stray click.
+// Bottom of the Machines page. The confirm step keeps sign-out from being a single stray click.
 export function CloudroomSignOut() {
   const status = useCloudroomAccount();
   const refresh = useRefreshCloudroom();
-  const logout = useMutation({ mutationFn: () => sdk.cloudroom.logout(), onSuccess: refresh });
+  const [open, setOpen] = useState(false);
+  const logout = useMutation({ mutationFn: () => sdk.cloudroom.logout(), onSuccess: async () => { setOpen(false); await refresh(); } });
   if (!status.data?.account || status.data.signingIn) return null;
   return <div className="flex flex-col items-center gap-2">
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild><Button variant="outline" size="sm">Sign out</Button></DropdownMenuTrigger>
-      <DropdownMenuContent align="center" className="w-72 p-1.5">
-        <DropdownMenuItem disabled={logout.isPending} onSelect={() => logout.mutate()}>Sign out of this app</DropdownMenuItem>
-        <p className="px-2 pb-1 pt-1.5 text-xs text-muted-foreground">Cloud agents keep running and local history stays. To switch accounts, sign out first. Existing cloud threads stay on their original account and VM.</p>
-      </DropdownMenuContent>
-    </DropdownMenu>
-    {logout.error instanceof Error && <p role="alert" className="text-sm">{logout.error.message}</p>}
+    <Button variant="outline" size="sm" onClick={() => { logout.reset(); setOpen(true); }}>Sign out</Button>
+    <ConfirmDeleteDialog open={open} onOpenChange={setOpen}>
+      <ConfirmDeleteDialogContent
+        title="Sign out of this app?"
+        description={<>Cloud agents keep running and local history stays. To switch accounts, sign out first. Existing cloud threads stay on their original account and VM.{logout.error instanceof Error && <span role="alert" className="mt-2 block text-destructive">{logout.error.message}</span>}</>}
+        confirmLabel="Sign out"
+        pending={logout.isPending}
+        onConfirm={() => logout.mutate()}
+        onCancel={() => setOpen(false)}
+      />
+    </ConfirmDeleteDialog>
   </div>;
 }

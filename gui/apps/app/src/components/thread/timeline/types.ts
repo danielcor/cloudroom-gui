@@ -53,6 +53,8 @@ export type ThreadTimelineSendToMainMessageHandler = (
 /** Set when the text comes from a chat message; `messageNumber` counts user and agent messages from 1. */
 export interface ThreadTimelineAddToChatSource {
   messageNumber: number | null;
+  /** Set when the number isn't known yet; the label gets it when this resolves. */
+  pendingMessageNumber?: Promise<number | null>;
 }
 
 export type ThreadTimelineAddToChatHandler = (

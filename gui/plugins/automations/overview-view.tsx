@@ -1126,6 +1126,7 @@ export function AutomationOverviewView({
   onModeChange: (mode: AutomationCollectionMode) => void;
   cloud?: {
     rows: readonly CloudAutomation[];
+    loaded?: boolean;
     actions: CloudAutomationActions;
   };
   review?: LoopReviewState;
@@ -1487,6 +1488,14 @@ export function AutomationOverviewView({
       </div>
     );
   }
+  // With no loops at all, Overview shows the templates. Only after both lists loaded without an error.
+  const templatesInOverview =
+    activeMode === "installed" &&
+    error === null &&
+    entries !== null &&
+    entries.length === 0 &&
+    cloud?.loaded === true &&
+    cloudRows.length === 0;
   return (
     <ResourceCollectionPage
       id="automations-collection"
@@ -1497,7 +1506,9 @@ export function AutomationOverviewView({
       }
       underlineTabs
       bandClassName={
-        activeMode === "installed" ? OVERVIEW_BAND_CLASSES : undefined
+        activeMode === "installed" && !templatesInOverview
+          ? OVERVIEW_BAND_CLASSES
+          : undefined
       }
       modes={[
         {
@@ -1517,7 +1528,7 @@ export function AutomationOverviewView({
       onModeChange={onModeChange}
       actions={
         <>
-          {activeMode === "installed" ? (
+          {activeMode === "installed" && !templatesInOverview ? (
             <>
               <div className="relative w-44 sm:w-56">
                 <Icon
@@ -1608,7 +1619,7 @@ export function AutomationOverviewView({
             onMark={review.onMark}
           />
         </ResourceCollectionViewport>
-      ) : activeMode === "templates" && templates ? (
+      ) : (activeMode === "templates" || templatesInOverview) && templates ? (
         <ResourceCollectionViewport scrollId="automations-templates">
           <LoopTemplatesView
             entries={entries}

@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -30,44 +29,6 @@ it("keeps desktop builds local without publishing", () => {
   expect(scripts.dist).toContain("pnpm run prepare-runtime");
   expect(scripts["dist:linux"]).toContain("pnpm run prepare-runtime");
 });
-
-it.each([".", "gui"])(
-  "rejects a mismatched pnpm version in workspace %s",
-  (directory) => {
-    const fixture = mkdtempSync(join(tmpdir(), "bb-pnpm-version-"));
-    onTestFinished(() => rmSync(fixture, { force: true, recursive: true }));
-    const workspace = resolve(fixture, directory);
-    mkdirSync(workspace, { recursive: true });
-    const fakeBin = resolve(fixture, "bin");
-    mkdirSync(fakeBin);
-    writeFileSync(
-      resolve(workspace, "package.json"),
-      '{"packageManager":"pnpm@9.15.1"}\n',
-    );
-    writeFileSync(resolve(fakeBin, "curl"), "#!/bin/sh\nexit 23\n");
-    chmodSync(resolve(fakeBin, "curl"), 0o755);
-
-    const result = spawnSync(
-      "bash",
-      [resolve(repoRoot, ".github/actions/setup-workspace/install-pnpm.sh")],
-      {
-        cwd: workspace,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          GITHUB_WORKSPACE: fixture,
-          PATH: `${fakeBin}:${process.env.PATH}`,
-          PNPM_VERSION: "9.15.0",
-        },
-      },
-    );
-
-    expect(result.status).toBe(1);
-    expect(result.stdout).toContain(
-      "pnpm version mismatch: package.json declares 9.15.1, but the action requested 9.15.0",
-    );
-  },
-);
 
 it.each([".", "gui"])(
   "checks workspace %s without following directory symlinks",

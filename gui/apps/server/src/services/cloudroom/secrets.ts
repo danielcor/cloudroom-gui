@@ -35,6 +35,7 @@ export class CloudSecrets {
     this.open.set(threadId, { id: request.id, controller });
     void (async () => {
       let values: Record<string, string> | null = null;
+      let reason = "the app could not show the form";
       try {
         if (!this.deps.pendingInteractions) throw new Error("Interactions are unavailable");
         const result = await this.deps.pendingInteractions.requestPluginInteraction({
@@ -43,13 +44,15 @@ export class CloudSecrets {
           timeoutMs: FORM_TIMEOUT_MS, signal: controller.signal,
         });
         if (result.outcome === "submitted") values = answerSchema.parse(result.value).values;
+        else reason = result.reason === "request-aborted" ? "replaced by a newer request" : result.reason;
       } catch (error) {
+        if (error instanceof Error) reason = `${reason}: ${error.message}`;
         this.deps.logger?.warn({ threadId, err: error }, "Cloud secret form could not open");
       } finally {
         if (this.open.get(threadId)?.controller === controller) this.open.delete(threadId);
       }
       // Answer even after an abort: a replaced request still waits in the core. Closed ones are already gone.
-      await client.answerSecret(record.session_id, request.id, values).catch(() => {});
+      await client.answerSecret(record.session_id, request.id, values, reason).catch(() => {});
     })();
   }
 }
