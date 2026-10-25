@@ -3256,6 +3256,28 @@ export function listContextWindowUsageHistory(
   return [...byTurn.values()].reverse();
 }
 
+// Matches the timeline: one "Context compacted" row per turn.
+export function countContextCompactions(
+  db: DbConnection,
+  args: ListContextWindowUsageRowsArgs,
+): number {
+  return (
+    db
+      .select({ count: sql<number>`COUNT(DISTINCT ${events.turnId})` })
+      .from(events)
+      .where(
+        and(
+          eq(events.threadId, args.threadId),
+          gte(events.sequence, args.sequenceStart),
+          sql`${events.parentToolCallId} IS NULL`,
+          isNotNestedTurnUsageEvent,
+          sql`(${events.type} = 'thread/compacted' OR (${events.type} = 'item/completed' AND ${events.itemKind} = 'contextCompaction'))`,
+        ),
+      )
+      .get()?.count ?? 0
+  );
+}
+
 export function getLatestThreadOutputEventRow(
   db: DbConnection,
   args: GetLatestThreadOutputEventRowArgs,

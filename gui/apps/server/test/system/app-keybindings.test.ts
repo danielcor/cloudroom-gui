@@ -434,6 +434,7 @@ describe("app keybindings", () => {
             shift: binding.shortcut.shift,
           })),
       ).toEqual([
+        { command: "composer.hardQueue", shift: false },
         { command: "modelPicker.cycleModel", shift: false },
         { command: "modelPicker.cycleModelBackward", shift: true },
         { command: "modelPicker.cycleProvider", shift: false },

@@ -44,12 +44,13 @@ export function Chip({ children, menu }: { children: ReactNode; menu: ReactNode 
   );
 }
 
-export function ImportChats({ onDone, empty }: { onDone?: () => void; empty?: ReactNode }) {
+export function ImportChats({ onStart, empty }: { onStart?: () => void; empty?: ReactNode }) {
   const sessions = useNativeSessions();
   const importSessions = useImportSessions();
   const { localHostId } = useHostDaemon();
   const [days, setDays] = useState<number | null>(30);
   const [off, setOff] = useState<Set<Harness>>(new Set());
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
 
   if (sessions.isPending) return <p className="text-sm text-(--ic-muted)" style={PALETTE}>Looking for chats on this Mac…</p>;
   if (sessions.error) return <p role="alert" className="text-sm text-destructive">{sessions.error.message}</p>;
@@ -80,14 +81,17 @@ export function ImportChats({ onDone, empty }: { onDone?: () => void; empty?: Re
   ));
   const start = () => {
     if (!localHostId) return appToast.error("This Mac is not connected yet. Try again in a moment.");
-    importSessions.mutate({ hostId: localHostId, sessions: chosen.map(({ harness, id }) => ({ harness, id })) }, {
-      onSuccess: ({ imported, skipped }) => {
+    setProgress({ done: 0, total: chosen.length });
+    // mutateAsync, not mutate callbacks: the toasts still show after this screen closes.
+    importSessions.mutateAsync({ hostId: localHostId, sessions: chosen.map(({ harness, id }) => ({ harness, id })), onProgress: (done) => setProgress((current) => ({ ...current, done })) }).then(
+      ({ imported, skipped }) => {
         appToast.success(`Imported ${imported.length} chat${imported.length === 1 ? "" : "s"}`);
         if (skipped.length) appToast.error(`${skipped.length} skipped. First reason: ${skipped[0]!.reason}`);
-        onDone?.();
       },
-      onError: (error) => appToast.error(error.message),
-    });
+      (error: Error) => appToast.error(error.message),
+    );
+    // Big imports take minutes, so the caller can move on while it runs.
+    onStart?.();
   };
 
   return (
@@ -112,9 +116,11 @@ export function ImportChats({ onDone, empty }: { onDone?: () => void; empty?: Re
           className={BUTTON}
         >
           {importSessions.isPending && <Icon name="Loading" className="size-4 animate-spin" aria-hidden />}
-          {importSessions.isPending ? `Importing ${chosen.length} chats…` : `Import ${chosen.length} chat${chosen.length === 1 ? "" : "s"}`}
+          {importSessions.isPending ? `Importing ${progress.done} of ${progress.total} chats…` : `Import ${chosen.length} chat${chosen.length === 1 ? "" : "s"}`}
         </button>
-        <span className="text-sm whitespace-nowrap text-(--ic-muted)">{picked.map(([id, name]) => `${count(id)} ${name}`).join(" · ")}</span>
+        <span className="text-sm whitespace-nowrap text-(--ic-muted)">
+          {importSessions.isPending ? "This keeps going if you leave this screen." : picked.map(([id, name]) => `${count(id)} ${name}`).join(" · ")}
+        </span>
       </div>
     </div>
   );

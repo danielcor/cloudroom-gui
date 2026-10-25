@@ -27,6 +27,14 @@ const testState = vi.hoisted(() => ({
     alt: false,
     shift: false,
   } as AppShortcut,
+  hardQueueShortcut: {
+    key: "Enter",
+    mod: false,
+    meta: false,
+    control: false,
+    alt: true,
+    shift: false,
+  } as AppShortcut,
 }));
 
 vi.mock("@/hooks/queries/system-queries", () => ({
@@ -65,6 +73,12 @@ vi.mock("@/hooks/queries/system-queries", () => ({
           desktopOnly: false,
           shortcut: testState.sidebarShortcut,
           when: { all: ["mainSurface" as const], none: ["modalOpen" as const] },
+        },
+        {
+          command: "composer.hardQueue" as const,
+          desktopOnly: false,
+          shortcut: testState.hardQueueShortcut,
+          when: { all: ["mainSurface" as const], none: [] },
         },
       ],
     },
@@ -106,17 +120,29 @@ function ShortcutHintState() {
   );
 }
 
-function renderComposer(extra: React.ReactNode = null) {
+function renderComposer(
+  extra: React.ReactNode = null,
+  {
+    value = "",
+    onSubmit = vi.fn(),
+    onHardQueueSubmit,
+  }: {
+    value?: string;
+    onSubmit?: () => void;
+    onHardQueueSubmit?: () => void;
+  } = {},
+) {
   render(
     <MemoryRouter>
       <AppCommandProvider>
         <SidebarToggleHandler />
         {extra}
         <PromptBoxInternal
-          value=""
+          value={value}
           mentionRanges={[]}
           onChange={vi.fn()}
-          onSubmit={vi.fn()}
+          onSubmit={onSubmit}
+          submission={{ onHardQueueSubmit }}
           mentionMenuPlacement="bottom"
           typeahead={{
             mention: {
@@ -164,6 +190,14 @@ afterEach(() => {
     meta: false,
     control: false,
     alt: false,
+    shift: false,
+  };
+  testState.hardQueueShortcut = {
+    key: "Enter",
+    mod: false,
+    meta: false,
+    control: false,
+    alt: true,
     shift: false,
   };
 });
@@ -267,6 +301,47 @@ describe("prompt editor app shortcuts", () => {
     pressInEditor(editor, { key: "Escape" });
 
     expect(document.activeElement).not.toBe(editor);
+  });
+
+  it("hard-queues the message with the default Alt+Enter", () => {
+    const onSubmit = vi.fn();
+    const onHardQueueSubmit = vi.fn();
+    const editor = renderComposer(null, {
+      value: "after the subagents",
+      onSubmit,
+      onHardQueueSubmit,
+    });
+
+    const event = pressInEditor(editor, { altKey: true, key: "Enter" });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onHardQueueSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("hard-queues the message with a rebound shortcut", () => {
+    testState.hardQueueShortcut = {
+      key: "q",
+      mod: true,
+      meta: false,
+      control: false,
+      alt: false,
+      shift: true,
+    };
+    const onHardQueueSubmit = vi.fn();
+    const editor = renderComposer(null, {
+      value: "after the subagents",
+      onHardQueueSubmit,
+    });
+
+    pressInEditor(editor, {
+      code: "KeyQ",
+      ctrlKey: true,
+      key: "Q",
+      shiftKey: true,
+    });
+
+    expect(onHardQueueSubmit).toHaveBeenCalledTimes(1);
   });
 
   it("keeps typed text in the composer", () => {

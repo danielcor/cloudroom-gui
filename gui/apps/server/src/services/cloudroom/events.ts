@@ -126,6 +126,15 @@ export function appendStartProgress(tx: DbTransaction, threadId: string, steps: 
   return true;
 }
 
+/** Whether a step of the latest start block still runs, like a fork's code that an app restart cut off. */
+export function startStepRunning(db: DbQueryConnection, threadId: string, key: string): boolean {
+  const rows = db.select({ data: events.data }).from(events)
+    .where(and(eq(events.threadId, threadId), eq(events.type, "system/thread-provisioning"))).orderBy(events.sequence).all()
+    .map((row) => JSON.parse(row.data) as StartProgress);
+  const latest = rows.at(-1)?.provisioningId;
+  return rows.filter((row) => row.provisioningId === latest).flatMap((row) => row.entries).filter((entry) => entry.key === key).at(-1)?.status === "started";
+}
+
 export function projectFollowUp(tx: DbTransaction, threadId: string, id: string): boolean {
   const saved = binding(tx, threadId);
   const request = command(tx, id);

@@ -46,7 +46,9 @@ function driverEnv(home: string): NodeJS.ProcessEnv {
     CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
     CUA_DRIVER_RS_UPDATE_CHECK: "false",
   };
-  for (const key of ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "TMPDIR"])
+  // The driver reads the desktop name to avoid claiming a screen reader on GNOME, which starts Orca.
+  const keys = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "TMPDIR"];
+  for (const key of [...keys, "XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION"])
     if (process.env[key]) env[key] = process.env[key];
   return env;
 }

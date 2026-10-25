@@ -47,15 +47,12 @@ export function findPane(root: LayoutNode, paneId: string): PaneNode | null {
 
 export function findPaneByThread(
   root: LayoutNode,
-  projectId: string,
   threadId: string,
 ): PaneNode | null {
   return (
     listPanes(root).find(
       (pane) =>
-        pane.content.kind === "thread" &&
-        pane.content.projectId === projectId &&
-        pane.content.threadId === threadId,
+        pane.content.kind === "thread" && pane.content.threadId === threadId,
     ) ?? null
   );
 }
@@ -71,9 +68,7 @@ export function findPaneByContent(
       if (content.kind === "new-thread") return true;
       if (content.kind === "thread") {
         return (
-          candidate.kind === "thread" &&
-          candidate.projectId === content.projectId &&
-          candidate.threadId === content.threadId
+          candidate.kind === "thread" && candidate.threadId === content.threadId
         );
       }
       if (content.kind === "plugin-detail") {

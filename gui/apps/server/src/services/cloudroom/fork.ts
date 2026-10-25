@@ -65,6 +65,11 @@ export function cloudForkOf(input: string | undefined): CloudFork | null {
   return fork ? cloudForkSchema.parse(fork) : null;
 }
 
+/** A child's parent (`code_from`), whose code it starts with (ADR 0229). */
+export function codeFromOf(input: string | undefined): string | undefined {
+  return input ? z.object({ code_from: z.string().optional() }).parse(JSON.parse(input)).code_from : undefined;
+}
+
 export function forkTurn(db: DbConnection, threadId: string, sourceSeqEnd: number | undefined): { turnId: string; endSequence: number } {
   const started = sourceSeqEnd === undefined ? findLastCompletedRootStoredTurn(db, { threadId }) : findLastRootStoredTurnStarted(db, { threadId, atOrBeforeSequence: sourceSeqEnd });
   const completed = started && listStoredTurnCompletedRowsByTurnIds(db, { threadId, turnIds: [started.turnId] }).at(-1);

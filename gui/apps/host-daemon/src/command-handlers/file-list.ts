@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fuzzyMatchPaths } from "@cloudroom/fuzzy-match";
 import { detectGitRepo, runGit } from "@cloudroom/host-workspace";
+import { isFsErrorWithCode } from "../fs-errors.js";
 import type {
   HostPathEntry,
   HostPathEntryKind,
@@ -203,6 +204,8 @@ export function finalizeListedPaths(
   };
 }
 
+const SKIPPED_SUBFOLDER_ERRORS = ["EACCES", "EPERM", "ENOENT", "ENOTDIR"];
+
 export async function listPathsRecursively(
   args: ListPathsRecursivelyArgs,
 ): Promise<ListedPath[]> {
@@ -231,10 +234,17 @@ export async function listPathsRecursively(
           name: entry.name,
         });
       }
-      const childResults = await listPathsRecursively({
-        ...args,
-        dir: fullPath,
-      });
+      let childResults: ListedPath[] = [];
+      try {
+        childResults = await listPathsRecursively({ ...args, dir: fullPath });
+      } catch (error) {
+        if (
+          !SKIPPED_SUBFOLDER_ERRORS.some((code) =>
+            isFsErrorWithCode(error, code),
+          )
+        )
+          throw error;
+      }
       for (const childResult of childResults) results.push(childResult);
       continue;
     }

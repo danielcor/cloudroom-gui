@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { deriveProjectNameFromPath, reasoningLevelSchema, serviceTierSchema, type ReasoningLevel, type Thread } from "@cloudroom/domain";
-import type { MacAccessLevel, NativeSession, RepoSuggestion } from "@cloudroom/sdk/browser";
+import type { MacAccessLevel, NativeSession, RepoSuggestion, SessionImportResult } from "@cloudroom/sdk/browser";
 import type { ProjectSelectorSuggestions } from "@/components/pickers/ProjectSelector";
 import { usePathPickerHost } from "@/hooks/useLocalPathPicker";
 import { useSetRootComposeProjectId } from "@/lib/root-compose-selection";
@@ -289,10 +289,25 @@ export function useProjectSuggestions(): ProjectSelectorSuggestions | undefined 
   };
 }
 
+/** A project's branches on GitHub, for a project with no folder on this Mac. */
+export function useGithubBranches(projectId: string, enabled: boolean) {
+  return useQuery({ queryKey: ["cloudroom-github-branches", projectId], queryFn: ({ signal }) => sdk.cloudroom.githubBranches(projectId, signal), enabled, retry: false, staleTime: 5 * 60_000 });
+}
+
+/** Imports in batches so a big import shows progress and keeps going after its screen closes. */
 export function useImportSessions() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ hostId, sessions }: { hostId: string; sessions: { harness: NativeSession["harness"]; id: string }[] }) => sdk.cloudroom.importSessions(hostId, sessions),
+    mutationFn: async ({ hostId, sessions, onProgress }: { hostId: string; sessions: { harness: NativeSession["harness"]; id: string }[]; onProgress?: (done: number) => void }) => {
+      const result: SessionImportResult = { imported: [], skipped: [] };
+      for (let index = 0; index < sessions.length; index += 20) {
+        const batch = await sdk.cloudroom.importSessions(hostId, sessions.slice(index, index + 20));
+        result.imported.push(...batch.imported);
+        result.skipped.push(...batch.skipped);
+        onProgress?.(Math.min(index + 20, sessions.length));
+      }
+      return result;
+    },
     onSettled: () => client.invalidateQueries(),
   });
 }

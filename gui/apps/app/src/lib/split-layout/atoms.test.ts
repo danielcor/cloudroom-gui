@@ -129,7 +129,7 @@ describe("closePanesForThreadsAtom", () => {
     });
     const layout = store.get(splitLayoutAtom);
     expect(countPanes(layout!.root)).toBe(1);
-    expect(findPaneByThread(layout!.root, "project-1", "thread-1")).toBeNull();
+    expect(findPaneByThread(layout!.root, "thread-1")).toBeNull();
   });
 
   it("closes the focused pane and reports the survivor the URL should follow", () => {

@@ -181,6 +181,20 @@ export function AppSidebar({
     );
   }, [activeProjectId, activeThreadId, openNavigationTarget]);
 
+  const activateLastPinnedThread = useCallback(
+    (): boolean =>
+      openNavigationTarget(
+        getSidebarThreadNavigationTargets(
+          sidebarRef.current?.querySelector<HTMLElement>(
+            '[data-sidebar-section-id="pinned"]',
+          ) ?? null,
+        )
+          .filter((target) => !target.isChild)
+          .at(-1),
+      ),
+    [openNavigationTarget],
+  );
+
   const isHiddenHostedBody = mobileHosted?.hidden === true;
   const isCompactCustomizeModeActive =
     isCompactViewport && compactCustomizeMode;
@@ -206,6 +220,9 @@ export function AppSidebar({
   );
   useAppCommandHandler("thread.oldestInProject", () =>
     isHiddenHostedBody ? false : activateOldestProjectThread(),
+  );
+  useAppCommandHandler("thread.lastPinned", () =>
+    isHiddenHostedBody ? false : activateLastPinnedThread(),
   );
 
   useEffect(() => {

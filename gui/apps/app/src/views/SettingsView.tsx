@@ -1372,6 +1372,7 @@ export function SettingsView() {
             state: {
               focusPrompt: true,
               initialPrompt: CREATE_CUSTOM_PALETTE_PROMPT,
+              executionTarget: "local",
             },
           })
         }

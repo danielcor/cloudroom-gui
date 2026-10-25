@@ -90,7 +90,7 @@ describe("applyThreadOpenToLayout", () => {
     );
 
     expect(listPanes(after.root)).toHaveLength(3);
-    expect(findPaneByThread(after.root, "p2", "thread-3")?.paneId).toBe(
+    expect(findPaneByThread(after.root, "thread-3")?.paneId).toBe(
       after.focusedPaneId,
     );
   });
@@ -118,9 +118,7 @@ describe("applyThreadOpenToLayout", () => {
       sizes: Array.from({ length: MAX_PANES }, () => 1 / MAX_PANES),
     });
     for (let index = 5; index <= MAX_PANES; index += 1) {
-      expect(
-        findPaneByThread(eight.root, "p1", `thread-${index}`),
-      ).not.toBeNull();
+      expect(findPaneByThread(eight.root, `thread-${index}`)).not.toBeNull();
     }
 
     const after = applyThreadOpenToLayout(
@@ -131,10 +129,10 @@ describe("applyThreadOpenToLayout", () => {
 
     expect(listPanes(after.root)).toHaveLength(MAX_PANES);
     expect(after.focusedPaneId).toBe(focusedPaneId);
-    expect(findPaneByThread(after.root, "p2", "thread-9")?.paneId).toBe(
+    expect(findPaneByThread(after.root, "thread-9")?.paneId).toBe(
       focusedPaneId,
     );
-    expect(findPaneByThread(after.root, "p1", "thread-8")).toBeNull();
+    expect(findPaneByThread(after.root, "thread-8")).toBeNull();
   });
 });
 

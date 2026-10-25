@@ -1412,7 +1412,7 @@ describe("automation CLI --script-file", () => {
       expect(created.stdout).toContain(`Copied ${sourcePath}`);
       expect(created.stdout).toContain(`to ${storedPath}`);
       expect(created.stdout).toContain(
-        `room-cli automation update ${automationId} --project proj_test --script-file ${sourcePath} --interpreter bash --timeout 120000`,
+        `room-cli automation update ${automationId} --project proj_test --script-file ${sourcePath} --interpreter bash`,
       );
 
       const shown = await t.cli.run(
@@ -1607,7 +1607,7 @@ describe("automation CLI --script-file", () => {
       expect(created.exitCode).toBe(0);
       const automationId = idFrom(created.stdout);
       expect(created.stdout).toContain(
-        `room-cli automation update ${automationId} --project proj_test --script-file '${sourcePath}' --interpreter python3 --timeout 5000 --env-json '{"CHANNEL":"qa","MSG":"it'\\''s"}'`,
+        `room-cli automation update ${automationId} --project proj_test --script-file '${sourcePath}' --interpreter python3`,
       );
     } finally {
       await t.cleanup();

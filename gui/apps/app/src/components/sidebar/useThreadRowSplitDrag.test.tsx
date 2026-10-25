@@ -93,7 +93,7 @@ describe("useThreadRowSplitDrag — openInSplit (cmd-click / context-menu entry)
     const layout = store.get(splitLayoutAtom);
     expect(layout).not.toBeNull();
     expect(countPanes(layout!.root)).toBe(2);
-    const opened = findPaneByThread(layout!.root, "p1", "t9");
+    const opened = findPaneByThread(layout!.root, "t9");
     expect(opened).not.toBeNull();
     expect(listPanes(layout!.root).at(-1)?.paneId).toBe(opened?.paneId);
     expect(layout!.focusedPaneId).toBe(opened?.paneId);
@@ -116,9 +116,9 @@ describe("useThreadRowSplitDrag — openInSplit (cmd-click / context-menu entry)
     openInSplit();
     const layout = store.get(splitLayoutAtom);
     expect(countPanes(layout!.root)).toBe(8);
-    const opened = findPaneByThread(layout!.root, "p1", "t9");
+    const opened = findPaneByThread(layout!.root, "t9");
     expect(opened?.paneId).toBe("pane-1");
-    expect(findPaneByThread(layout!.root, "p1", "t1")).toBeNull();
+    expect(findPaneByThread(layout!.root, "t1")).toBeNull();
     expect(navigateSpy).toHaveBeenCalledWith("/projects/p1/threads/t9");
   });
 

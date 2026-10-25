@@ -96,6 +96,10 @@ function requireFlag(args: ParsedArgs, name: string): string {
   return value;
 }
 
+function optionalFlag(args: ParsedArgs, name: string): string | undefined {
+  return args.flags.has(name) ? requireFlag(args, name) : undefined;
+}
+
 function optionalJson(args: ParsedArgs, value: unknown): string | null {
   return boolFlag(args, "json") ? `${JSON.stringify(value, null, 2)}\n` : null;
 }
@@ -195,10 +199,6 @@ const AGENT_TARGET_FLAG_NAMES = [
   "environment",
   "new-environment",
 ] as const;
-
-function hasAgentTargetFlag(args: ParsedArgs): boolean {
-  return AGENT_TARGET_FLAG_NAMES.some((name) => args.flags.has(name));
-}
 
 function validateAgentTargetOptions(args: ParsedArgs): void {
   const providedTargetOptions = AGENT_TARGET_FLAG_NAMES.filter((name) =>
@@ -430,20 +430,20 @@ type BuiltExecution = {
   scriptSource?: ScriptFileSource;
 };
 
-type AgentTarget = Pick<
-  Extract<AutomationResponse["execution"], { mode: "agent" }>,
-  "environment" | "targetThreadId"
+type ScriptExecution = Extract<
+  AutomationResponse["execution"],
+  { mode: "script" }
 >;
 
 async function buildExecution(
   bb: Pick<BbPluginApi, "sdk">,
   args: ParsedArgs,
   ctx: Pick<PluginCliContext, "cwd" | "threadId">,
-  currentTarget?: AgentTarget,
+  current?: ScriptExecution,
 ): Promise<BuiltExecution> {
   const prompt = flag(args, "prompt");
-  const script = flag(args, "script");
-  const scriptFile = flag(args, "script-file");
+  const script = optionalFlag(args, "script");
+  const scriptFile = optionalFlag(args, "script-file");
   const hasAgent = prompt !== undefined;
   const hasScript = script !== undefined || scriptFile !== undefined;
   if (hasAgent && hasScript) {
@@ -461,7 +461,7 @@ async function buildExecution(
       "Agent loops do not accept --interpreter, --timeout, or --env-json.",
     );
   }
-  if (!hasAgent && !hasScript) {
+  if (!hasAgent && !hasScript && current === undefined) {
     throw new Error(
       "Provide an execution mode: agent (--prompt --provider --model) or script (--script-file <path> or --script <inline>).",
     );
@@ -475,14 +475,8 @@ async function buildExecution(
       );
     }
     validateAgentTargetOptions(args);
-    const target: AgentTarget =
-      currentTarget !== undefined && !hasAgentTargetFlag(args)
-        ? currentTarget
-        : {
-            environment: await buildAgentEnvironment(bb, args),
-            targetThreadId: flag(args, "target-thread"),
-          };
-    const { environment } = target;
+    const environment = await buildAgentEnvironment(bb, args);
+    const targetThreadId = flag(args, "target-thread");
     const reasoning = flag(args, "reasoning");
     const serviceTier = flag(args, "service-tier");
     const parsedServiceTier =
@@ -505,9 +499,7 @@ async function buildExecution(
           providerRoutingForEnvironment(environment),
         ),
         environment,
-        ...(target.targetThreadId
-          ? { targetThreadId: target.targetThreadId }
-          : {}),
+        ...(targetThreadId ? { targetThreadId } : {}),
       },
     };
   }
@@ -527,29 +519,45 @@ async function buildExecution(
   if (script !== undefined && scriptFile !== undefined) {
     throw new Error("Provide exactly one of --script or --script-file.");
   }
-  const explicitInterpreter = parseScriptInterpreter(flag(args, "interpreter"));
-  const timeoutMs = parseTimeoutMs(flag(args, "timeout"));
-  const env = parseScriptEnv(flag(args, "env-json"));
+  const explicitInterpreter = parseScriptInterpreter(
+    optionalFlag(args, "interpreter"),
+  );
+  const timeoutMs = parseTimeoutMs(optionalFlag(args, "timeout"));
+  const env = parseScriptEnv(optionalFlag(args, "env-json")) ?? current?.env;
   const scriptSource = await loadScriptFileSource(bb, args, ctx);
   const content = scriptSource ? scriptSource.content : script;
-  if (!content) throw new Error("Missing script content.");
+  const keptScript =
+    content !== undefined || current === undefined
+      ? undefined
+      : current.scriptFile !== undefined
+        ? { scriptFile: current.scriptFile }
+        : current.script !== undefined
+          ? { script: current.script }
+          : undefined;
+  if (!content && keptScript === undefined) {
+    throw new Error("Missing script content.");
+  }
   const interpreter =
     explicitInterpreter ??
+    current?.interpreter ??
     (scriptSource ? interpreterForPath(scriptSource.path) : undefined);
   return {
     execution: {
       mode: "script",
-      script: content,
-      ...(scriptSource ? { scriptFile: scriptSource.path } : {}),
+      ...(keptScript ?? {
+        script: content,
+        ...(scriptSource ? { scriptFile: scriptSource.path } : {}),
+      }),
       ...(interpreter ? { interpreter } : {}),
-      timeoutMs: timeoutMs ?? AUTOMATION_SCRIPT_TIMEOUT_DEFAULT_MS,
+      timeoutMs:
+        timeoutMs ?? current?.timeoutMs ?? AUTOMATION_SCRIPT_TIMEOUT_DEFAULT_MS,
       ...(env ? { env } : {}),
     },
     ...(scriptSource ? { scriptSource } : {}),
   };
 }
 
-const COMPLETE_EXECUTION_FLAG_NAMES = [
+const SCRIPT_EXECUTION_FLAG_NAMES = [
   "script",
   "script-file",
   "interpreter",
@@ -613,21 +621,9 @@ async function buildAgentExecutionUpdate(
   return update;
 }
 
-async function currentAgentTarget(
-  service: Pick<AutomationService, "get">,
-  input: { projectId: string; automationId: string },
-): Promise<AgentTarget | undefined> {
-  const current = await service.get(input);
-  if (!("execution" in current) || current.execution.mode !== "agent") {
-    return undefined;
-  }
-  const { environment, targetThreadId } = current.execution;
-  return { environment, targetThreadId };
-}
-
 async function buildUpdateRequest(
   bb: Pick<BbPluginApi, "sdk">,
-  service: Pick<AutomationService, "get">,
+  service: Pick<AutomationService, "list">,
   args: ParsedArgs,
   ctx: Pick<PluginCliContext, "cwd" | "threadId">,
 ): Promise<{
@@ -649,19 +645,34 @@ async function buildUpdateRequest(
     request.trigger = buildTrigger(args);
   }
   let scriptSource: ScriptFileSource | undefined;
-  const replacesAgentExecution =
+  const hasScriptFlag = SCRIPT_EXECUTION_FLAG_NAMES.some((name) =>
+    args.flags.has(name),
+  );
+  const hasAgentExecution =
     args.flags.has("prompt") &&
     args.flags.has("provider") &&
     args.flags.has("model");
+  const current =
+    hasScriptFlag || hasAgentExecution
+      ? service.list({ projectId }).find(({ id }) => id === automationId)
+      : undefined;
+  if ((hasScriptFlag || hasAgentExecution) && current === undefined) {
+    throw new Error("Loop not found");
+  }
+  const currentExecution =
+    current !== undefined && "execution" in current
+      ? current.execution
+      : undefined;
   if (
-    replacesAgentExecution ||
-    COMPLETE_EXECUTION_FLAG_NAMES.some((name) => args.flags.has(name))
+    hasScriptFlag ||
+    (hasAgentExecution && currentExecution?.mode !== "agent")
   ) {
-    const currentTarget =
-      replacesAgentExecution && !hasAgentTargetFlag(args)
-        ? await currentAgentTarget(service, { projectId, automationId })
-        : undefined;
-    const built = await buildExecution(bb, args, ctx, currentTarget);
+    const built = await buildExecution(
+      bb,
+      args,
+      ctx,
+      currentExecution?.mode === "script" ? currentExecution : undefined,
+    );
     request.execution = built.execution;
     scriptSource = built.scriptSource;
   } else {
@@ -677,7 +688,7 @@ async function buildUpdateRequest(
     request.agent === undefined
   ) {
     throw new Error(
-      "No changes requested. Provide --name, schedule flags, a complete agent/script execution, or partial agent update flags.",
+      "No changes requested. Provide --name, schedule flags, or agent or script execution flags.",
     );
   }
   return { request, ...(scriptSource ? { scriptSource } : {}) };
@@ -722,6 +733,13 @@ function printAutomation(
   ) {
     lines.push(`  Script:    ${automation.execution.storedScriptPath}`);
   }
+  if (automation.execution.mode === "script") {
+    lines.push(
+      `  Interpreter: ${automation.execution.interpreter ?? "default"}`,
+      `  Timeout:   ${automation.execution.timeoutMs} ms`,
+      `  Env:       ${Object.keys(automation.execution.env ?? {}).join(", ") || "-"}`,
+    );
+  }
   if (automation.execution.mode === "agent") {
     lines.push(
       `  Provider:  ${automation.execution.providerId}`,
@@ -761,10 +779,6 @@ function refreshScriptFileCommand(
   if (source.hostId !== undefined) argv.push("--host", source.hostId);
   if (automation.execution.interpreter !== undefined) {
     argv.push("--interpreter", automation.execution.interpreter);
-  }
-  argv.push("--timeout", String(automation.execution.timeoutMs));
-  if (automation.execution.env !== undefined) {
-    argv.push("--env-json", JSON.stringify(automation.execution.env));
   }
   return argv.map(shellQuote).join(" ");
 }
@@ -874,9 +888,9 @@ function helpText(): string {
   return `Loop commands (room-cli loop is the same command)
 
 room-cli automation list --project <id>          Also lists the Cloud loops whose thread is in that project
-room-cli automation create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] | --script <inline> | --script-file <path> [--host <name-or-id>])
+room-cli automation create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] [--permission-mode accept-edits|auto|full] | --script <inline> | --script-file <path> [--host <name-or-id>])
 room-cli automation show <automationId> --project <id>
-room-cli automation update <automationId> --project <id> [--name <name>] [schedule flags] [complete agent/script execution flags | --provider <id> --model <model> --reasoning <level> --service-tier default|fast|none] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (target is kept unless one is given)
+room-cli automation update <automationId> --project <id> [--name <name>] [schedule flags] [--prompt <text>] [--provider <id>] [--model <model>] [--reasoning <level>] [--service-tier default|fast|none] [--permission-mode accept-edits|auto|full] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] [--script <inline> | --script-file <path>] [--interpreter <name>] [--timeout <ms>] [--env-json <json>] (omitted settings are kept; switching between agent and script replaces them)
 room-cli automation pause <automationId> --project <id>
 room-cli automation resume <automationId> --project <id>
 room-cli automation run <automationId> --project <id> [--idempotency-key <key>]
@@ -1084,7 +1098,7 @@ export function registerAutomationCli(args: {
         name: "update",
         summary: "Update loop configuration",
         usage:
-          "room-cli automation update <automationId> --project <id> [flags] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (target is kept unless one is given)",
+          "room-cli automation update <automationId> --project <id> [flags] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (omitted settings are kept)",
       },
       {
         name: "pause",

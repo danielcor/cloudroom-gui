@@ -49,6 +49,7 @@ import {
   getThreadConversationOutlineRecord,
   listContextWindowUsageRows,
   listContextWindowUsageHistory,
+  countContextCompactions,
   isTimelineCursorSequencePresent,
   listStoredConversationOutlineEventRows,
   listStoredClientTurnRequestIdsInRange,
@@ -1282,8 +1283,13 @@ function completeThreadTimelineBuildProfile(
 function withContextWindowUsageHistory(
   usage: ThreadContextWindowUsage,
   history: number[],
+  compactions: number,
 ): ThreadContextWindowUsage {
-  return history.length > 0 ? { ...usage, history } : usage;
+  return {
+    ...usage,
+    ...(history.length > 0 ? { history } : {}),
+    ...(compactions > 0 ? { compactions } : {}),
+  };
 }
 
 function buildThreadTimelineInternal(
@@ -1506,6 +1512,10 @@ function buildThreadTimelineInternal(
         ? withContextWindowUsageHistory(
             timeline.contextWindowUsage,
             listContextWindowUsageHistory(db, {
+              sequenceStart: contextBoundarySeq ?? 0,
+              threadId: thread.id,
+            }),
+            countContextCompactions(db, {
               sequenceStart: contextBoundarySeq ?? 0,
               threadId: thread.id,
             }),

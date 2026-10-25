@@ -113,14 +113,12 @@ export function useThreadGroupSplitIndicator(
     ) {
       return NO_INDICATOR;
     }
-    const threadKeys = new Set(
-      threads.map((thread) => `${thread.projectId}\0${thread.id}`),
-    );
+    const threadIds = new Set(threads.map((thread) => thread.id));
     const matchingPaneIds = new Set<string>();
     for (const pane of listPanes(layout.root)) {
       if (
         pane.content.kind === "thread" &&
-        threadKeys.has(`${pane.content.projectId}\0${pane.content.threadId}`)
+        threadIds.has(pane.content.threadId)
       ) {
         matchingPaneIds.add(pane.paneId);
       }

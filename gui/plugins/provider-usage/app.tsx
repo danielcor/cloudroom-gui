@@ -20,6 +20,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@cloudroom/shared-ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@cloudroom/shared-ui/tooltip";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import {
   formatUsageReset,
@@ -525,18 +531,23 @@ function MachineSelector({
   );
 }
 
-/** Today's active minutes, shown only while the Time in Cloudroom plugin is enabled. */
+const formatMinutes = (minutes: number) =>
+  minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+
+/** Today's and the last 7 days' active minutes, shown only while the Time in Cloudroom plugin is enabled. */
 function TimeInCloudroom() {
-  const [minutes, setMinutes] = useState<number | null>(null);
+  const [time, setTime] = useState<{ today: number; week: number } | null>(null);
   useEffect(() => {
     let live = true;
     let timer: number | null = null;
     const load = async () => {
       if (document.visibilityState !== "visible") return;
-      const time = (await (await fetch("/api/v1/cloudroom/time-in-app?only=today")).json()) as { today?: unknown };
-      if (live) setMinutes(typeof time.today === "number" ? time.today : null);
+      const { days = {} } = (await (await fetch("/api/v1/cloudroom/time-in-app")).json()) as { days?: Record<string, number> };
+      const day = (back: number) => new Date(Date.now() - back * 864e5).toLocaleDateString("en-CA");
+      const week = [0, 1, 2, 3, 4, 5, 6].reduce((sum, back) => sum + (days[day(back)] ?? 0), 0);
+      if (live) setTime({ today: days[day(0)] ?? 0, week });
     };
-    // The plugin list is checked once, when the panel opens; then only today's number, once a minute.
+    // The plugin list is checked once, when the panel opens; then the minutes, once a minute.
     void (async () => {
       const list = (await (await fetch("/api/v1/plugins")).json()) as { plugins?: { id: string; enabled: boolean }[] };
       if (!live || !list.plugins?.some((plugin) => plugin.id === "time-in-cloudroom" && plugin.enabled)) return;
@@ -548,16 +559,24 @@ function TimeInCloudroom() {
       if (timer !== null) window.clearInterval(timer);
     };
   }, []);
-  if (minutes === null) return null;
+  if (time === null) return null;
   return (
-    <section
-      aria-label="Time in Cloudroom"
-      title="Time in Cloudroom today"
-      className="flex shrink-0 items-center gap-1 tabular-nums"
-    >
-      <Icon name="Clock" aria-hidden="true" className="size-3 shrink-0" />
-      {minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`}
-    </section>
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <section aria-label="Time in Cloudroom" className="flex shrink-0 items-center gap-1 tabular-nums">
+            <Icon name="Clock" aria-hidden="true" className="size-3 shrink-0" />
+            {formatMinutes(time.today)}
+          </section>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="grid grid-cols-[auto_auto] gap-x-4 border border-border bg-popover text-popover-foreground shadow-md">
+          <span className="text-muted-foreground">Today</span>
+          <span className="text-right tabular-nums">{formatMinutes(time.today)}</span>
+          <span className="text-muted-foreground">Last 7 days</span>
+          <span className="text-right tabular-nums">{formatMinutes(time.week)}</span>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

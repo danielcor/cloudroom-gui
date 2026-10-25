@@ -53,3 +53,37 @@ export async function resolvePermissionMode(
     `Provider ${providerId} has no supported default permission mode.`,
   );
 }
+
+export async function requireReasoningLevel(
+  bb: ProviderPermissionApi,
+  providerId: string,
+  reasoningLevel: string,
+  routing: ProviderRouting = {},
+): Promise<void> {
+  const providers = await bb.sdk.providers.list(routing);
+  const supported =
+    providers
+      .find((candidate) => candidate.id === providerId)
+      ?.reasoningLevels?.map(({ id }) => id) ?? [];
+  if (supported.length > 0 && !supported.includes(reasoningLevel)) {
+    throw new Error(
+      `Reasoning level ${reasoningLevel} is not supported by provider ${providerId}. Supported: ${supported.join(", ")}.`,
+    );
+  }
+}
+
+export async function requireServiceTier(
+  bb: ProviderPermissionApi,
+  providerId: string,
+  serviceTier: string | undefined,
+  routing: ProviderRouting = {},
+): Promise<void> {
+  if (serviceTier === undefined || serviceTier === "default") return;
+  const providers = await bb.sdk.providers.list(routing);
+  const provider = providers.find((candidate) => candidate.id === providerId);
+  if (provider?.capabilities.supportsServiceTier === false) {
+    throw new Error(
+      `Service tier ${serviceTier} is not supported by provider ${providerId}. Clear it with --service-tier none.`,
+    );
+  }
+}

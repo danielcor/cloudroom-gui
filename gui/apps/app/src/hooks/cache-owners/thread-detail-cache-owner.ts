@@ -8,6 +8,7 @@ import {
   environmentQueryKey,
   hostQueryKey,
   hostsQueryKey,
+  threadDetailBootstrapQueryKey,
   threadQueryKey,
 } from "../queries/query-keys";
 
@@ -71,4 +72,20 @@ export function ingestThreadDetailBootstrap({
       upsertHostList({ host, hosts }),
     );
   }
+}
+
+export function moveThreadDetailBootstrap({
+  projectId,
+  queryClient,
+  threadId,
+}: {
+  projectId: string;
+  queryClient: QueryClient;
+  threadId: string;
+}): void {
+  const queryKey = threadDetailBootstrapQueryKey(threadId);
+  queryClient.setQueryData<ThreadWithIncludesResponse>(queryKey, (thread) =>
+    thread ? { ...thread, projectId } : thread,
+  );
+  void queryClient.invalidateQueries({ queryKey });
 }

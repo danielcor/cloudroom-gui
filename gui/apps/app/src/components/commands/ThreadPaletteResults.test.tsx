@@ -37,6 +37,7 @@ const navigation = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/thread-queries", () => ({
   hasThreadSearchableQuery: (value: string) =>
     value.replace(/\s/g, "").length >= 2,
+  THREAD_SEARCH_LIMIT_PER_GROUP: 20,
   useThreadSearch: vi.fn(),
 }));
 

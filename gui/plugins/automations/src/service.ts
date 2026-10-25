@@ -29,6 +29,8 @@ import { createAutomationId } from "./ids.js";
 import {
   providerRoutingForEnvironment,
   resolvePermissionMode,
+  requireReasoningLevel,
+  requireServiceTier,
 } from "./provider-permissions.js";
 import { publishAutomationChange, REVIEW_SIGNAL_PROJECT } from "./realtime.js";
 import {
@@ -790,6 +792,28 @@ export function createAutomationService(args: {
             bb,
             updatedExecution.providerId,
             updatedExecution.permissionMode,
+            providerRoutingForEnvironment(updatedExecution.environment),
+          );
+        }
+        if (
+          input.agent.providerId !== undefined ||
+          input.agent.reasoningLevel !== undefined
+        ) {
+          await requireReasoningLevel(
+            bb,
+            updatedExecution.providerId,
+            updatedExecution.reasoningLevel,
+            providerRoutingForEnvironment(updatedExecution.environment),
+          );
+        }
+        if (
+          input.agent.providerId !== undefined ||
+          input.agent.serviceTier !== undefined
+        ) {
+          await requireServiceTier(
+            bb,
+            updatedExecution.providerId,
+            updatedExecution.serviceTier,
             providerRoutingForEnvironment(updatedExecution.environment),
           );
         }

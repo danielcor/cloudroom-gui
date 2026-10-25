@@ -64,6 +64,7 @@ export function decideGate(args: {
       : { kind: "error", message: "launch_app needs bundle_id or name." };
   }
   if (tool === "get_desktop_state") return { kind: "screen" };
+  if (tool === "list_windows") return { kind: "free" };
   if (typeof input.pid === "number") return { kind: "pid", pid: input.pid };
   if (PID_REQUIRED_TOOLS.has(tool))
     return { kind: "error", message: `${tool} needs a pid so Cloudroom knows which app you are controlling. Find it with list_apps or list_windows.` };

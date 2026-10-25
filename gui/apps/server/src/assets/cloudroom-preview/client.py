@@ -603,7 +603,9 @@ def identity(folder):
 MAC_LIMIT = 16 * 1024 * 1024
 MAC_LEVELS = ('off', 'read-only', 'ask', 'full')
 # Read-only commands (ADR 0186): no file writes outside temp folders, no signals to other processes, and no tools that
-# drive apps or system settings. macOS also refuses setuid tools like ps and top here; pgrep and lsof still work.
+# drive apps or system settings. Beyond those named tools, they cannot run programs from the writable temp folders, open
+# apps or URLs through Launch Services, send Apple Events, create background jobs, or write preferences through cfprefsd.
+# macOS also refuses setuid tools like ps and top here; pgrep and lsof still work.
 # They also cannot reach this Mac's own servers and sockets (the app's local API, ssh-agent, Docker; DNS still works) or
 # read Cloudroom's folder beyond its tools, so they cannot act through the app or its tokens (ADR 0260). The internet works.
 READ_ONLY = ('(version 1)(allow default)(deny file-write*)'
@@ -612,6 +614,11 @@ READ_ONLY = ('(version 1)(allow default)(deny file-write*)'
              '(deny signal (target others))'
              '(deny process-exec (literal "/usr/bin/osascript") (literal "/usr/bin/open") (literal "/usr/bin/shortcuts")'
              ' (literal "/usr/bin/automator") (literal "/bin/launchctl") (literal "/usr/bin/tccutil") (literal "/usr/bin/defaults"))'
+             '(deny process-exec (subpath "/private/tmp") (subpath "/private/var/folders"))'
+             # System services act outside this sandbox, so block the routes rather than only the tools that use them.
+             '(deny mach-lookup (global-name "com.apple.coreservices.launchservicesd") (global-name "com.apple.coreservices.appleevents")'
+             ' (global-name "com.apple.lsd.open") (global-name "com.apple.lsd.openurl") (global-name "com.apple.lsd.modifydb"))'
+             '(deny appleevent-send)(deny job-creation)(deny user-preference-write)'
              # Seatbelt's localhost misses IPv4-mapped IPv6 like ::ffff:127.0.0.1, so IPv6 is blocked outright and clients fall
              # back to IPv4. It must be ip4 here: next to an ip6 rule, (remote ip "localhost:*") stops matching 127.0.0.1.
              '(deny network-outbound (remote ip4 "localhost:*") (remote ip6 "*:*") (remote unix-socket))'

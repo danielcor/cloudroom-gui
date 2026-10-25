@@ -11,11 +11,14 @@ import { randomId } from "@/lib/random-id";
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateEnvironmentWorkspaceStateQueries } from "@/hooks/cache-owners/environment-cache-effects";
+import { moveThreadDetailBootstrap } from "@/hooks/cache-owners/thread-detail-cache-owner";
 import { useMediaQuery } from "@cloudroom/shared-ui/hooks/use-media-query";
 import { useSystemProviderInfo } from "@/hooks/queries/system-queries";
 import { useCloudroomConnection, cloudFeatureSupported, useOpenCloudFile, useCloudroomThread, useCloudroomThreadWorkspace } from "@/hooks/queries/cloudroom-queries";
 import { useNavigate } from "react-router-dom";
-import { useAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
+import { findPane, replacePaneContent } from "@/lib/split-layout";
+import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import { useDesktopBrowserReveal } from "@/lib/use-desktop-browser-reveal";
 import { atomWithStorage } from "jotai/utils";
 import {
@@ -321,6 +324,7 @@ import {
 import { useRouteState } from "@/hooks/useRouteState";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
 import { DefaultPaneContextProvider, usePaneContext } from "./PaneContext";
+import { threadPaneContent } from "./splitThreadNavigation";
 import { ThreadArchiveCommandHandler } from "./ThreadArchiveCommandHandler";
 import { ThreadPinCommandHandler } from "./ThreadPinCommandHandler";
 import { ThreadRenameCommandHandler } from "./ThreadRenameCommandHandler";
@@ -537,9 +541,10 @@ export function ThreadDetailView(props: ThreadDetailViewProps) {
 
 function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const { projectId, threadId } = props;
-  const { isFocused, navigateInPane, onRequestClose, isBoundedPane } =
+  const { isFocused, navigateInPane, onRequestClose, isBoundedPane, paneId } =
     usePaneContext();
   const navigate = useNavigate();
+  const setSplitLayout = useSetAtom(splitLayoutAtom);
   useFixedPanelTabsStorageMaintenance();
   const systemConfigQuery = useSystemConfig();
   const threadDetailBootstrapQuery = useThreadDetailBootstrap(threadId);
@@ -549,6 +554,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     data: thread,
     isFetching,
     isLoadingError,
+    isPlaceholderData,
     error,
   } = useThread(threadId, {
     enabled: hasThreadDetailBootstrapSettled,
@@ -2483,14 +2489,40 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
       pluginFileOpeners,
     ],
   );
-  const movedProjectId =
-    thread && thread.projectId !== projectId ? thread.projectId : null;
+  const liveProjectId =
+    hasThreadDetailBootstrapSettled &&
+    thread &&
+    !isPlaceholderData &&
+    !isFetching
+      ? thread.projectId
+      : null;
+  const bootstrapProjectId = threadDetailBootstrapQuery.data?.projectId;
   useEffect(() => {
-    if (movedProjectId)
-      navigate(getThreadRoutePath({ projectId: movedProjectId, threadId }), {
-        replace: true,
-      });
-  }, [movedProjectId, navigate, threadId]);
+    if (liveProjectId === null || bootstrapProjectId === undefined) return;
+    if (bootstrapProjectId === liveProjectId) return;
+    moveThreadDetailBootstrap({
+      projectId: liveProjectId,
+      queryClient,
+      threadId,
+    });
+  }, [bootstrapProjectId, liveProjectId, queryClient, threadId]);
+  const movedProjectId =
+    liveProjectId !== null && liveProjectId !== projectId
+      ? liveProjectId
+      : null;
+  useEffect(() => {
+    if (!movedProjectId) return;
+    const moved = { projectId: movedProjectId, threadId };
+    setSplitLayout((layout) => {
+      const pane = layout && findPane(layout.root, paneId);
+      if (!layout || pane?.content.kind !== "thread") return layout;
+      if (pane.content.threadId !== threadId) return layout;
+      return {
+        ...replacePaneContent(layout, paneId, threadPaneContent(moved)),
+        focusedPaneId: layout.focusedPaneId,
+      };
+    });
+  }, [movedProjectId, paneId, setSplitLayout, threadId]);
   const handleOpenFilePreview = useCallback<OpenFilePreviewHandler>(
     (relativePath) => {
       if (
@@ -2511,10 +2543,10 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     [handleOpenLiveFilePreview, thread?.environmentId],
   );
 
-  if (threadQueryState.status === "loading" || movedProjectId) {
+  if (threadQueryState.status === "loading") {
     return <RouteLoadingSkeleton isBoundedPane={isBoundedPane} />;
   }
-  if (!thread || thread.projectId !== projectId) {
+  if (!thread) {
     return (
       <PageShell contentClassName="min-h-full items-center justify-center">
         <p className="py-12 text-center text-sm text-destructive">

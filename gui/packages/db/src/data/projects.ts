@@ -148,7 +148,7 @@ export function getPublicProjectByLocalPathSource(
 
 function insertProjectRow(
   tx: DbTransaction,
-  input: { name: string; gitRemoteUrl?: string },
+  input: { name: string; gitRemoteUrl?: string; githubRepoId?: number },
 ) {
   const now = Date.now();
   const lastProject = getLastPublicProject(tx);
@@ -162,6 +162,7 @@ function insertProjectRow(
       name: input.name,
       sortKey,
       ...(input.gitRemoteUrl ? { gitRemoteUrl: input.gitRemoteUrl } : {}),
+      ...(input.githubRepoId ? { githubRepoId: input.githubRepoId } : {}),
       createdAt: now,
       updatedAt: now,
     })
@@ -222,7 +223,7 @@ export function createProject(
 export function createRemoteProject(
   db: DbConnection,
   notifier: DbNotifier,
-  input: { name: string; gitRemoteUrl: string },
+  input: { name: string; gitRemoteUrl: string; githubRepoId?: number },
 ) {
   const project = db.transaction((tx) => insertProjectRow(tx, input));
   notifier.notifyProject(project.id, ["project-created"]);
@@ -289,6 +290,20 @@ export function ensurePersonalProject(db: DbConnection) {
 
 export interface UpdateProjectInput {
   name?: string;
+}
+
+/** Saves the project's GitHub repo ID, and its remote under the repo's current name after a rename or transfer. */
+export function setProjectGithubRepo(
+  db: DbConnection,
+  notifier: DbNotifier,
+  id: string,
+  input: { githubRepoId: number; gitRemoteUrl: string },
+) {
+  db.update(projects)
+    .set({ ...input, updatedAt: Date.now() })
+    .where(eq(projects.id, id))
+    .run();
+  notifier.notifyProject(id, ["project-updated"]);
 }
 
 export function setProjectGitRemoteUrlIfMissing(

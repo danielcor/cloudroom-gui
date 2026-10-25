@@ -165,6 +165,12 @@ export function ThreadContextWindowCard({
             {showHistory ? `${history.length} turns` : `${leftPercent}% left`}
           </span>
         </div>
+        {usage.compactions ? (
+          <p className="text-xs text-muted-foreground max-md:text-sm">
+            Compacted {usage.compactions}{" "}
+            {usage.compactions === 1 ? "time" : "times"}
+          </p>
+        ) : null}
         {note ? (
           <p className="text-xs text-muted-foreground max-md:text-sm">{note}</p>
         ) : null}
@@ -243,6 +249,7 @@ export function ThreadContextWindowIndicator({
         : "text-muted-foreground";
 
   const titleLabel = usage.estimated ? "Estimated context" : "Context window";
+  const compactions = usage.compactions ?? 0;
 
   return (
     <Popover
@@ -260,8 +267,11 @@ export function ThreadContextWindowIndicator({
             event.preventDefault();
             setPinned((value) => !value);
           }}
-          className="-m-1 inline-flex size-8 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={`Context window ${usedPercent}% used`}
+          className={cn(
+            "-m-1 inline-flex h-8 min-w-8 cursor-pointer items-center justify-center gap-1 rounded-full transition-colors hover:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            compactions > 0 && "px-2",
+          )}
+          aria-label={`Context window ${usedPercent}% used${compactions > 0 ? `, compacted ${compactions} times` : ""}`}
         >
           <svg
             viewBox="0 0 16 16"
@@ -289,6 +299,11 @@ export function ThreadContextWindowIndicator({
               transform="rotate(-90 8 8)"
             />
           </svg>
+          {compactions > 0 ? (
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {compactions}
+            </span>
+          ) : null}
         </button>
       </PopoverTrigger>
       <PopoverContent

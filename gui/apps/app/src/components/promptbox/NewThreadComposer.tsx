@@ -136,8 +136,8 @@ export interface NewThreadComposerSeed {
   serviceTier?: ServiceTier;
   permissionMode?: PermissionMode;
   environment?: NewThreadRequest["environment"];
-  /** A Cloud thread's fork starts in Cloud. */
-  executionTarget?: "cloud";
+  /** A Cloud thread's fork starts in Cloud. Making a palette starts Local. */
+  executionTarget?: "local" | "cloud";
   initialPrompt?: string;
 }
 
@@ -1834,6 +1834,13 @@ export function NewThreadComposer({
                 <CloudBranchPicker
                   projectId={projectId}
                   hostId={primaryHostId}
+                  fromGithub={
+                    !primaryHostId ||
+                    !findLocalPathProjectSourceForHost(
+                      projectSources,
+                      primaryHostId,
+                    )
+                  }
                   value={cloudBaseBranch}
                   onChange={(branch) => setCloudBranch({ projectId, branch })}
                   disabled={locks.environment}

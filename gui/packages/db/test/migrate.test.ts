@@ -684,6 +684,7 @@ function dropCloudroomSchema(db: DbConnection): void {
     ["queued_thread_messages", "hard_queue"],
     ["projects", "hidden_at"],
     ["threads", "purpose"],
+    ["projects", "github_repo_id"],
   ]) {
     if (
       db.$client

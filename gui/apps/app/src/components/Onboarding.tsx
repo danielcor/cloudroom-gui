@@ -726,7 +726,7 @@ function ProjectStep({ close, added, setAdded, imported, setImported }: {
       <p className="mt-3 max-w-[560px] text-base text-(--ob-muted)">{empty ? "No agent chats to import. Pick a folder and your first agent starts there." : "Your agent chats move over. Originals stay untouched."}</p>
       <div className="mt-7">
         <ImportChats
-          onDone={() => { track("project", "started", "chat_import"); setImported(true); }}
+          onStart={() => { track("project", "started", "chat_import"); setImported(true); }}
           empty={(
             <button type="button" disabled={add.isPending} onClick={addFolder} className="flex h-[88px] w-[640px] max-w-full items-center gap-4 border-2 border-(--ob-ink) bg-(--ob-lime) px-7 text-[25px] font-bold text-black shadow-[7px_7px_0_var(--ob-ink)] transition-transform hover:-translate-y-0.5 active:translate-x-0.5 active:translate-y-0.5 active:shadow-[3px_3px_0_var(--ob-ink)] disabled:opacity-60 [&_svg]:size-7">
               <Icon name="Folder" aria-hidden />

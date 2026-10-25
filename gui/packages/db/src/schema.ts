@@ -150,6 +150,7 @@ export const projects = sqliteTable(
     kind: text("kind").$type<ProjectKind>().notNull().default("standard"),
     name: text("name").notNull(),
     gitRemoteUrl: text("git_remote_url"),
+    githubRepoId: integer("github_repo_id"),
     sortKey: text("sort_key").notNull().default("V"),
     deletedAt: integer("deleted_at"),
     hiddenAt: integer("hidden_at"),

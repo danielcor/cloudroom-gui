@@ -198,6 +198,15 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
       none: ["modalOpen", "browserFocus"],
     },
   ),
+  binding(
+    "thread.lastPinned",
+    "e",
+    { mod: true },
+    {
+      all: ["mainSurface"],
+      none: ["modalOpen", "browserFocus"],
+    },
+  ),
   ...numberedChatBindings(THREAD_JUMP_APP_COMMAND_IDS, mainWithoutModal),
   unassignedBinding("pane.focus.previous", splitWithoutModal),
   unassignedBinding("pane.focus.next", splitWithoutModal),
@@ -241,6 +250,12 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     "composer.focus",
     "c",
     { mod: true, shift: true },
+    composerWithoutModal,
+  ),
+  binding(
+    "composer.hardQueue",
+    "Enter",
+    { alt: true },
     composerWithoutModal,
   ),
   binding(

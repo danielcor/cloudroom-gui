@@ -112,9 +112,12 @@ export function reconcileLayoutForContent(
   const existing = findPaneByContent(layout.root, content);
   if (existing !== null) {
     const withRouteState =
-      existing.content.kind === "plugin-panel" &&
-      content.kind === "plugin-panel" &&
-      existing.content.subPath !== content.subPath
+      (existing.content.kind === "plugin-panel" &&
+        content.kind === "plugin-panel" &&
+        existing.content.subPath !== content.subPath) ||
+      (existing.content.kind === "thread" &&
+        content.kind === "thread" &&
+        existing.content.projectId !== content.projectId)
         ? replacePaneContent(layout, existing.paneId, content)
         : layout;
     return withRouteState.focusedPaneId === existing.paneId
@@ -141,11 +144,7 @@ export function applyThreadOpenToLayout(
   if (layout === null) {
     return createSinglePaneLayout(thread);
   }
-  const existing = findPaneByThread(
-    layout.root,
-    thread.projectId,
-    thread.threadId,
-  );
+  const existing = findPaneByThread(layout.root, thread.threadId);
   const decision = decideThreadDrop({
     zone: threadOpenSplitZone(split),
     threadAlreadyOpen: existing !== null,
@@ -174,7 +173,7 @@ export function applyThreadPaneActionToLayout(
   thread: ThreadRoutePathArgs,
   action: ThreadPaneAction,
 ): ThreadPaneActionLayoutResult {
-  const pane = findPaneByThread(layout.root, thread.projectId, thread.threadId);
+  const pane = findPaneByThread(layout.root, thread.threadId);
   if (pane === null || countPanes(layout.root) < 2) {
     return { layout, maximizedPaneId, dimInactiveSplits: null };
   }

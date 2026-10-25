@@ -11,6 +11,7 @@ export {
   reorderProject,
   setProjectGitRemoteUrlIfMissing,
   setProjectHidden,
+  setProjectGithubRepo,
   updateProject,
   deleteProject,
 } from "./projects.js";
@@ -288,6 +289,7 @@ export {
   listActiveBackgroundTaskCountsByThreadIds,
   listContextWindowUsageRows,
   listContextWindowUsageHistory,
+  countContextCompactions,
   listEvents,
   listStoredConversationOutlineEventRows,
   listTimelineSegmentAnchorsDescending,

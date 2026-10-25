@@ -185,6 +185,8 @@ export interface StartBranchPickerSection {
 
 interface StartBranchPickerProps {
   label: string;
+  /** Muted text before an emphasized label, e.g. "Branch from:". Hidden when the prompt box is compact. */
+  prefix?: string;
   title?: string;
   sections: readonly StartBranchPickerSection[];
   selected: string | null;
@@ -203,6 +205,7 @@ interface StartBranchPickerProps {
 /** The "start from" branch menu shared by Local and Cloud threads: search, then branches grouped by where they live. */
 export function StartBranchPicker({
   label,
+  prefix,
   title,
   sections,
   selected,
@@ -278,7 +281,21 @@ export function StartBranchPicker({
               name="GitMerge"
               className={COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS}
             />
-            <span className="min-w-0 truncate">{label}</span>
+            {prefix ? (
+              <span className="flex min-w-0 items-baseline gap-1">
+                <span
+                  data-promptbox-hide-compact=""
+                  className="shrink-0 text-muted-foreground"
+                >
+                  {prefix}
+                </span>
+                <span className="min-w-0 truncate font-medium text-foreground">
+                  {label}
+                </span>
+              </span>
+            ) : (
+              <span className="min-w-0 truncate">{label}</span>
+            )}
           </span>
           <Icon
             name="ChevronDown"

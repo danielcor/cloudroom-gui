@@ -86,7 +86,7 @@ function ApprovalCard({ interaction, submit, cancel }: PluginPendingInteractionP
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        void decide("thread");
+        void decide("always");
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape") void decide("deny");
@@ -111,11 +111,11 @@ function ApprovalCard({ interaction, submit, cancel }: PluginPendingInteractionP
         <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void decide("deny")}>
           Deny
         </Button>
-        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void decide("always")}>
-          Always allow
+        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void decide("thread")}>
+          Only this thread
         </Button>
         <Button type="submit" size="sm" disabled={busy} autoFocus>
-          Allow for this thread
+          Always allow
         </Button>
       </div>
     </form>

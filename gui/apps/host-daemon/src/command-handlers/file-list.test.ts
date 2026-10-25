@@ -200,6 +200,43 @@ describe("finalizeListedPaths", () => {
 });
 
 describe("listPathsRecursively", () => {
+  it.skipIf(process.getuid?.() === 0)(
+    "skips unreadable subfolders but fails on an unreadable root",
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-file-list-"));
+      const locked = path.join(root, "locked");
+      try {
+        await fs.mkdir(locked);
+        await fs.writeFile(path.join(locked, "secret.txt"), "");
+        await fs.writeFile(path.join(root, "calc.py"), "");
+        await fs.chmod(locked, 0o000);
+
+        const listPaths = (dir: string) =>
+          listPathsRecursively({
+            dir,
+            root: dir,
+            includeFiles: true,
+            includeDirectories: true,
+            includeHidden: false,
+            ignoredPaths: new Set<string>(),
+            excludeNames: new Set<string>(),
+          });
+
+        const listed = await listPaths(root);
+        expect(listed.map((entry) => entry.path).sort()).toEqual([
+          "calc.py",
+          "locked",
+        ]);
+        await expect(listPaths(locked)).rejects.toMatchObject({
+          code: "EACCES",
+        });
+      } finally {
+        await fs.chmod(locked, 0o755).catch(() => undefined);
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("returns slash-separated relative paths for nested entries", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-file-list-"));
     try {

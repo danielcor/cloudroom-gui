@@ -9,14 +9,14 @@ import { z } from "zod";
 import { findCliExecutable } from "@cloudroom/process-utils";
 import { ApiError } from "../../errors.js";
 import { CloudroomClient, CloudroomConnectionError, CloudroomError, UPLOAD_PART, authRequiredMessages, type CodexAuthStatus, type SessionRecord, type VmRun, type VmRunResult } from "./client.js";
-import { CLOUD_HARNESSES, HARNESS_NAMES, appendStartProgress, endedTurn, isAcpProvider, isCloudProvider, projectFollowUp, projectInitialPrompt, projectRecord, retractStillQueuedPrompts, type CloudProvider, type StartStep } from "./events.js";
+import { CLOUD_HARNESSES, HARNESS_NAMES, appendStartProgress, endedTurn, isAcpProvider, isCloudProvider, projectFollowUp, projectInitialPrompt, projectRecord, retractStillQueuedPrompts, startStepRunning, type CloudProvider, type StartStep } from "./events.js";
 import { mentionsOpenAISide401 } from "./codex-errors.js";
 import { codexOutage } from "./openai-status.js";
 import { buildThreadStatusChangeMetadata } from "../threads/thread-runtime-display.js";
 import { cloudPluginInstructions, cloudroomSystemPrompt, prepareCloudInstructionInput, resolveCustomInstructions } from "../threads/custom-instructions.js";
-import { baseBranch, binding, bindings, command, commands, coreInUse, queuedPrompts, saveBinding, saveCommandState, saveStatus, effectivePrompt, projectCopyProgress, stampBindings, teleportBlocked, unstartedTurn, type Binding, type Command } from "./store.js";
-import { copyProject, githubRepository, localProjectNote, planProjectCopy, writeFilesState, type ProjectCopyJob } from "./project-copy.js";
-import { CHILD_HINT, cloudForkOf, cloudForkPoint, FORK_HARNESSES, FORK_HINT, landForkCode, localForkPoint, startCloudFork, threadCode, uploadInParts } from "./fork.js";
+import { baseBranch, binding, bindings, command, commands, coreInUse, localTeleports, queuedPrompts, saveBinding, saveCommandState, saveStatus, effectivePrompt, projectCopyProgress, stampBindings, teleportBlocked, unstartedTurn, type Binding, type Command } from "./store.js";
+import { copyProject, copyRunning, githubRepository, localProjectNote, planProjectCopy, planProjectCopyOrThrow, reportProjectCopy, writeFilesState, type ProjectCopyJob } from "./project-copy.js";
+import { CHILD_HINT, cloudForkOf, cloudForkPoint, codeFromOf, FORK_HARNESSES, FORK_HINT, landForkCode, localForkPoint, startCloudFork, threadCode, uploadInParts } from "./fork.js";
 import { copyForkSourceHistory } from "../threads/thread-fork-history.js";
 import { CloudGitError, savedWorkspacePath } from "./git.js";
 import { appendClientTurnEvent, getLastExecutionOptions } from "../threads/thread-events.js";
@@ -166,8 +166,17 @@ export function requireNativeThread(thread: Pick<Thread, "executionTarget">): vo
 
 type PromptAttachment = { name: string; kind: "image" | "file"; localPath: string; id?: string; path?: string };
 /** Runs when a project copy ends, with the client that ran it: a sandbox that slept mid-copy has a new address.
- *  `partial` says why only `.env` files arrived. */
-type Landed = (error?: string, client?: CloudroomClient, partial?: string) => void;
+ *  `partial` says why only `.env` files arrived. It resolves once everything after the copy is done. */
+type Landed = (error?: string, client?: CloudroomClient, partial?: string) => Promise<void>;
+const CUT_SHORT = "The project copy was cut short, so some files may be missing.";
+/** A project copy's target: one folder per thread sandbox, or one shared folder on a VM. */
+const copyKey = (sandbox: string | null, workspace: string) => sandbox ? `${sandbox}:${workspace}` : workspace;
+
+/** The project folder a thread's first message copies into, if it has one. */
+function copyWorkspace(input: string | undefined): string | null {
+  const workspace = input && z.object({ workspace: z.string().optional() }).parse(JSON.parse(input)).workspace;
+  return workspace && workspace !== ROOT_WORKSPACE ? workspace : null;
+}
 
 function cloudTextContent(content: unknown): unknown {
   return Array.isArray(content) ? content.filter(part => part?.type === "text") : content;
@@ -418,6 +427,8 @@ class CloudroomService {
   private claudeConnected: boolean | null = null;
   private readonly resumingStarts = new Set<string>();
   private readonly pausedCopies = new Map<string, { job: ProjectCopyJob; landed: Landed; tries: number }>();
+  // Threads whose cut copy resumeCutCopy is planning, so a reconnect meanwhile can't plan a second.
+  private readonly retrying = new Set<string>();
   private readonly catchUps = new Map<string, number>();
   /** Threads whose sandbox address just answered 404 and is being woken again (feedback #596). */
   private readonly rewoken = new Set<string>();
@@ -1475,7 +1486,7 @@ class CloudroomService {
     if (workspace.workspace === ROOT_WORKSPACE) return previousPath;
     const moved = binding(this.deps.db, thread.id)!;
     const sandbox = sandboxThread(moved.coreUrl);
-    const job = await planProjectCopy(this.deps, client, thread.id, workspace.workspace, { key: sandbox ? `${sandbox}:${workspace.workspace}` : workspace.workspace });
+    const job = await planProjectCopy(this.deps, client, thread.id, workspace.workspace, { key: copyKey(sandbox, workspace.workspace) });
     if (job) this.copyInto(client, job, () => void this.ensureBranch(thread.id, true));
     else void this.ensureBranch(thread.id, true);
     return previousPath;
@@ -1954,7 +1965,7 @@ class CloudroomService {
     this.noticeCloudParent(threadId, "not_started", "start", message);
   }
 
-  private progress(threadId: string, steps: StartStep[], block?: "completed"): void {
+  private progress(threadId: string, steps: StartStep[], block?: "completed" | "failed"): void {
     if (this.deps.db.transaction((tx) => appendStartProgress(tx, threadId, steps, block))) this.notify(threadId, ["system/thread-provisioning"], false);
   }
 
@@ -1986,6 +1997,7 @@ class CloudroomService {
     void this.deliverChildReports();
     for (const saved of bindings(this.deps.db)) {
       this.holdRejectedStart(saved.threadId);
+      this.pauseCutCopy(saved.threadId);
       if (this.deps.db.transaction(tx => projectInitialPrompt(tx, saved.threadId))) this.notify(saved.threadId, ["client/turn/requested"]);
       this.retractQueuedHistory(saved.threadId);
     }
@@ -2096,7 +2108,7 @@ class CloudroomService {
         if (harness === "pi") await this.copyPiSetup(client, Boolean(sandbox));
         const fork = cloudForkOf(initial?.input);
         const sideChat = initial?.command === "side_chat" ? z.object({ side_chat: z.string() }).parse(JSON.parse(initial.input)).side_chat : null;
-        const codeFrom = initial ? z.object({ code_from: z.string().optional() }).parse(JSON.parse(initial.input)).code_from : undefined;
+        const codeFrom = codeFromOf(initial?.input);
         // A Cloud parent's child reports its own turns, and takes tell, stop and archive, through the website (ADR 0259).
         // Only a parent with a sandbox of its own has a link there; children of one sharing a sandbox keep the app's path.
         const relayed = Boolean(codeFrom && getThread(this.deps.db, threadId)?.parentThreadId === codeFrom && capabilities.relay && binding(this.deps.db, codeFrom)?.coreUrl === SANDBOX_PREFIX + codeFrom);
@@ -2104,9 +2116,10 @@ class CloudroomService {
           this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(initial.input), parent_thread: codeFrom }) }).where(eq(cloudroomCommands.id, initial.id)).run();
         }
         const parentThread = relayed ? { parent_thread: codeFrom } : {};
+        const target = options.workspace && options.workspace !== ROOT_WORKSPACE ? options.workspace : null;
         if (fork && !capabilities.fork) throw new ApiError(503, "cloudroom_update", "Update the cloud core to fork Cloud threads. Your message is saved.");
         const [copy, started] = await Promise.all([
-          options.workspace && options.workspace !== ROOT_WORKSPACE ? planProjectCopy(this.deps, client, threadId, options.workspace, { key: sandbox ? `${sandbox}:${options.workspace}` : options.workspace, branch: baseBranch(initial?.input) }) : null,
+          target ? planProjectCopy(this.deps, client, threadId, target, { key: copyKey(sandbox, target), branch: baseBranch(initial?.input) }) : null,
           sideChat
             ? this.startSideChat(client, threadId, saved.startRequestId, harness, sideChat)
             : fork
@@ -2134,33 +2147,14 @@ class CloudroomService {
         const firstSent = new Promise<void>(resolve => { releaseCopy = resolve; });
         // `room-cli files wait` holds the agent until the files, and a fork's code, have landed (ADR 0209).
         // A child in a Personal project has no workspace of its own, so its status file sits next to the sandbox root.
-        const workspace = options.workspace && options.workspace !== ROOT_WORKSPACE && (files.length || started.code) ? options.workspace
+        const workspace = target && (files.length || started.code) ? target
           : started.code ? await client.sessionWorkspace(started.sessionId).then(({ path }) => path, () => null) : null;
         // Code from another thread replaces the folder's files, so the agent must wait for it from its first command.
         const marked = workspace ? started.code ? this.filesState(client, threadId, workspace, "copying") : firstSent.then(() => this.filesState(client, threadId, workspace, "copying")) : null;
         if (started.code) await marked;
-        const landed: Landed = (error, current = client, partial) => {
-          if (files.length) this.progress(threadId, [{ key: "files", status: error ? "failed" : "completed" }]);
-          const finish = (failure?: string | null) => {
-            if (marked && workspace) void marked.then(() => this.filesState(current, threadId, workspace, failure ? `failed: ${failure}` : "ready"));
-          };
-          const missing = error ?? partial;
-          if (!started.code) {
-            void this.ensureBranch(threadId, true);
-            finish(missing);
-            return;
-          }
-          // A fork's branch then moves to its source's code, so the agent sees what the source saw.
-          void this.ensureBranch(threadId, true).then(() => landForkCode(client, started)).then(async (failure) => {
-            // A child folder with no Git gets its repository only now, on a cloudroom/ branch: rename it to its room/ one
-            // before the agent goes on.
-            if (!failure) await this.ensureBranch(threadId, false);
-            this.progress(threadId, [{ key: "fork", status: failure ? "failed" : "completed" }]);
-            finish(failure ?? missing);
-          });
-        };
+        const landed = this.landing(threadId, client, started, files.length > 0, workspace, marked);
         if (copy) this.copy(client, copy, landed, firstSent);
-        else if (started.code) landed();
+        else if (started.code) void landed();
         else if (sandbox) void this.ensureBranch(threadId, true);
       }
       if (epoch !== this.epoch) return;
@@ -2696,13 +2690,38 @@ class CloudroomService {
     this.warn("Cloud thread stream broke", error, { threadId });
   }
 
+  /** What a new thread's project copy does once it lands: the thread's own branch, a fork's or child's code, its start
+   *  steps, and the status `room-cli files wait` reads (ADR 0209). A copy an app restart cut off lands the same way. */
+  private landing(threadId: string, client: CloudroomClient, started: Parameters<typeof landForkCode>[1] | null, files: boolean, workspace: string | null, marked: Promise<void> | null): Landed {
+    const land = async (error?: string, current = client, partial?: string) => {
+      if (files) this.progress(threadId, [{ key: "files", status: error ? "failed" : "completed" }]);
+      const finish = async (failure?: string | null) => {
+        if (marked && workspace) await marked.then(() => this.filesState(current, threadId, workspace, failure ? `failed: ${failure}` : "ready"));
+      };
+      const missing = error ?? partial;
+      if (!started?.code) {
+        await Promise.all([this.ensureBranch(threadId, true), finish(missing)]);
+        return;
+      }
+      // A fork's branch then moves to its source's code, so the agent sees what the source saw.
+      await this.ensureBranch(threadId, true);
+      const failure = await landForkCode(current, started);
+      // A child folder with no Git gets its repository only now, on a cloudroom/ branch: rename it to its room/ one
+      // before the agent goes on.
+      if (!failure) await this.ensureBranch(threadId, false);
+      this.progress(threadId, [{ key: "fork", status: failure ? "failed" : "completed" }]);
+      await finish(failure ?? missing);
+    };
+    return (error, current, partial) => land(error, current, partial).catch(failure => this.warn("Cloud project copy did not land", failure, { threadId }));
+  }
+
   /** Copies a new thread's project. If its sandbox sleeps or drops mid-copy (say, the usage cap paused it), the copy waits
    *  and restarts on the thread's next connection, up to 3 times, instead of failing. */
   private copy(client: CloudroomClient, job: ProjectCopyJob, landed: Landed, after?: Promise<void>, tries = 0): void {
     copyProject(this.deps, client, job, (error, partial) => {
       // A copy that falls short shows no error card, so the log is where we see how often it happens.
       if (error ?? partial) this.warn("Cloud project copy fell short", error ?? partial, { threadId: job.threadId });
-      landed(error, client, partial);
+      return landed(error, client, partial);
     }, after, tries < 3 ? () => {
       this.pausedCopies.set(job.threadId, { job, landed, tries: tries + 1 });
       // Reconnecting finds the sandbox's new address, or that it sleeps; the copy resumes once a stream connects.
@@ -2714,21 +2733,58 @@ class CloudroomService {
   async retryCopy(threadId: string): Promise<void> {
     const saved = binding(this.deps.db, threadId);
     const input = command(this.deps.db, `first_${threadId}`)?.input;
-    const workspace = input && z.object({ workspace: z.string().optional() }).parse(JSON.parse(input)).workspace;
-    if (!saved?.sessionId || !workspace || workspace === ROOT_WORKSPACE) throw new ApiError(409, "cloudroom_no_project_copy", "This thread has no project to copy.");
+    const workspace = copyWorkspace(input);
+    if (!saved?.sessionId || !workspace) throw new ApiError(409, "cloudroom_no_project_copy", "This thread has no project to copy.");
     const client = await this.client(saved);
-    const sandbox = sandboxThread(saved.coreUrl);
-    const job = await planProjectCopy(this.deps, client, threadId, workspace, { key: sandbox ? `${sandbox}:${workspace}` : workspace, branch: baseBranch(input) });
+    const job = await planProjectCopy(this.deps, client, threadId, workspace, { key: copyKey(sandboxThread(saved.coreUrl), workspace), branch: baseBranch(input) });
     if (!job) throw new ApiError(409, "cloudroom_no_project_copy", "Nothing is left to copy, or a copy is already running.");
     this.copyInto(client, job);
+  }
+
+  /** Plans a copy the last app run cut off again, once the thread's stream connects (#106). An empty folder gets the copy
+   *  and branch a new thread gets, but no fork's or child's code, which would replace whatever the agent did meanwhile:
+   *  the agent is told. A folder that already has files may hold the agent's work, so it only gets missing `.env` files,
+   *  and the copy ends as cut short. */
+  private async resumeCutCopy(threadId: string, client: CloudroomClient): Promise<void> {
+    const saved = binding(this.deps.db, threadId);
+    const input = command(this.deps.db, `first_${threadId}`)?.input;
+    const workspace = copyWorkspace(input);
+    if (!saved?.sessionId || !workspace) {
+      reportProjectCopy(this.deps, threadId, { phase: "complete", completed: 0, total: 0 });
+      return;
+    }
+    this.retrying.add(threadId);
+    try {
+      // A sandbox that can't be reached, or a folder another copy is filling, throws, so the copy waits for the next connection.
+      const job = await planProjectCopyOrThrow(this.deps, client, threadId, workspace, { key: copyKey(sandboxThread(saved.coreUrl), workspace), branch: baseBranch(input) });
+      // A move, or another copy, that started meanwhile brings its own.
+      if (this.copyBusy(threadId) || copyWorkspace(command(this.deps.db, `first_${threadId}`)?.input) !== workspace) return;
+      if (job && (job.clone || job.copyAll)) {
+        // Only a first copy cut off before its fork's or child's code landed lost that code; a move's or a retry's never had it.
+        const lost = startStepRunning(this.deps.db, threadId, "fork") ? "The app restarted while copying the source thread's code, so it was not copied." : undefined;
+        if (lost) this.progress(threadId, [{ key: "fork", status: "failed" }]);
+        const landed = this.landing(threadId, client, null, true, workspace, this.filesState(client, threadId, workspace, "copying"));
+        this.copy(client, job, (error, current, partial) => landed(error, current, lost ?? partial));
+        return;
+      }
+      reportProjectCopy(this.deps, threadId, { phase: "complete", completed: 0, total: 0 });
+      this.progress(threadId, [], "failed");
+      if (job) this.copyInto(client, job);
+      else void this.filesState(client, threadId, workspace, `failed: ${CUT_SHORT}`, true);
+    } finally { this.retrying.delete(threadId); }
+  }
+
+  /** A copy runs, or a move or Teleport brings its own, so no other may start. */
+  private copyBusy(threadId: string): boolean {
+    return copyRunning(threadId) || this.switching.has(threadId) || teleportBlocked(this.deps.db, threadId) || localTeleports.has(threadId);
   }
 
   /** A folder that already has files gets only its `.env` files again, so a copy cut short stays failed, never ready. */
   private copyInto(client: CloudroomClient, job: ProjectCopyJob, done?: () => void): void {
     const full = job.clone || job.copyAll;
     const marked = full ? this.filesState(client, job.threadId, job.workspace, "copying") : Promise.resolve();
-    this.copy(client, job, (error, current = client, partial) => void marked.then(() => this.filesState(current, job.threadId, job.workspace,
-      error ?? partial ? `failed: ${error ?? partial}` : full ? "ready" : "failed: The project copy was cut short, so some files may be missing.", !full)).then(done));
+    this.copy(client, job, (error, current = client, partial) => marked.then(() => this.filesState(current, job.threadId, job.workspace,
+      error ?? partial ? `failed: ${error ?? partial}` : full ? "ready" : `failed: ${CUT_SHORT}`, !full)).then(done));
   }
 
   private filesState(client: CloudroomClient, threadId: string, workspace: string, state: string, onlyIfCopying = false): Promise<void> {
@@ -2738,13 +2794,22 @@ class CloudroomService {
 
   private resumeCopy(threadId: string, client: CloudroomClient): void {
     const paused = this.pausedCopies.get(threadId);
-    // After an app restart only the saved phase is left, so the copy is planned again.
+    // After an app restart only the saved phase is left (`pauseCutCopy`), so the copy is planned again.
     if (!paused) {
-      if (projectCopyProgress(this.deps.db, threadId)?.phase === "waiting") void this.retryCopy(threadId).catch(() => {});
+      if (projectCopyProgress(this.deps.db, threadId)?.phase === "waiting" && !this.retrying.has(threadId) && !this.copyBusy(threadId))
+        void this.resumeCutCopy(threadId, client).catch(error => this.warn("Cloud project copy did not resume", error, { threadId }));
       return;
     }
     this.pausedCopies.delete(threadId);
     this.copy(client, paused.job, paused.landed, undefined, paused.tries);
+  }
+
+  /** A copy the last app run cut off before it landed waits as paused, and resumeCopy plans it again once the thread's
+   *  stream connects (#106). A copy still running in this app, or Teleport's own, is left alone. */
+  private pauseCutCopy(threadId: string): void {
+    const phase = projectCopyProgress(this.deps.db, threadId)?.phase;
+    if ((phase === "cloning" || phase === "uploading") && !copyRunning(threadId) && copyWorkspace(command(this.deps.db, `first_${threadId}`)?.input))
+      reportProjectCopy(this.deps, threadId, { phase: "waiting", completed: 0, total: 0 });
   }
 
   private setConnectionIssue(threadId: string, phase: ConnectionPhase, error?: unknown): void {

@@ -60,7 +60,7 @@ Managing:
 ```bash
 room-cli automation list --project <id>
 room-cli automation show <automationId> --project <id>
-room-cli automation update <automationId> --project <id> [--name <name>] [schedule flags] [complete execution flags | partial agent update flags]
+room-cli automation update <automationId> --project <id> [--name <name>] [schedule flags] [agent or script execution flags] (omitted settings are kept)
 room-cli automation pause <automationId> --project <id>
 room-cli automation resume <automationId> --project <id>
 room-cli automation run <automationId> --project <id> [--idempotency-key <key>]

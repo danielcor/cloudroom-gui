@@ -125,9 +125,7 @@ describe("split layout operations", () => {
     expect(countPanes(eight.root)).toBe(MAX_PANES);
     expect(eight.focusedPaneId).toBe("pane-8");
     expect(rejected).toBe(eight);
-    expect(findPaneByThread(two.root, "project-2", "thread-2")?.paneId).toBe(
-      "pane-2",
-    );
+    expect(findPaneByThread(two.root, "thread-2")?.paneId).toBe("pane-2");
   });
 
   it("replaces and swaps content while applying the reference focus semantics", () => {

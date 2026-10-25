@@ -16,11 +16,11 @@ describe("@cloudroom/templates", () => {
     expect(guide).toContain("local CLI machine fallback");
   });
 
-  it("documents complete and partial automation execution updates", () => {
+  it("documents automation updates that keep omitted settings", () => {
     const guide = renderTemplate("bbGuideAutomations", {});
 
     expect(guide).toContain("room-cli automation update <automationId>");
-    expect(guide).toContain("Partial updates to an existing");
+    expect(guide).toContain("and keeps every");
     expect(guide).toContain("--env-json");
     expect(guide).toContain("--reasoning <none|low|medium|high");
     expect(guide).toContain("--service-tier default|fast|none");

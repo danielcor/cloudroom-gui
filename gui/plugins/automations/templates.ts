@@ -105,6 +105,48 @@ List the runtimes and frameworks this repo runs on, with their versions (for exa
 Test it from outside like a careful attacker: auth and session handling, access to other users' data, exposed admin or debug routes, open redirects, missing security headers, and leaked keys in the shipped JavaScript. Stay gentle: no load testing, no destructive requests, no real user data changes. Do not edit code.${REPORT}`,
   },
   {
+    id: "prove-it-bug-hunt",
+    name: "Prove-it bug hunt",
+    description:
+      "Proves one security bug with a failing test, fixes it, and opens a PR.",
+    category: "security",
+    priority: 2,
+    icon: "Bug",
+    cron: "0 1 * * *",
+    providerId: "pi",
+    model: "moonshotai/kimi-k3.1-pro",
+    reasoningLevel: "high",
+    prompt: `Prove-it bug hunt: find one real security bug in this repo's own code, prove it, fix it, and open a PR.
+${rotate("Prove-it bug hunt")}
+Work on a new branch. Never touch live systems or real user data, never print secret values, and add no new dependencies.
+In that area, follow outside input to auth checks, queries, shell commands, file paths, and secrets. A bug counts only if you prove it: write a test in the repo's existing test framework that fails before your fix. Then make the smallest fix, and run that test and the nearby tests until they pass.
+Before the PR, start a reviewer on a different model that is set up (\`room-cli thread spawn --parent-self --provider <harness> --prompt "..."\`): it checks the bug is real and the fix breaks nothing, and ends with SHIP or HOLD. If HOLD, fix the reason once and ask again.
+When you are done:
+- Proven bug and SHIP: push the branch and open a PR with \`gh pr create\`: what is wrong, who can reach it, the test that proves it, and the fix. Leave this thread open with the PR link.
+- Otherwise, write 1-2 lines on what you checked, then archive this thread with \`room-cli thread archive --self\`.`,
+  },
+  {
+    id: "fuzz-and-fix",
+    name: "Fuzz-and-fix",
+    description:
+      "Fuzzes one input parser. Fixes any crash it finds and opens a PR.",
+    category: "security",
+    priority: 2,
+    icon: "Zap",
+    cron: "0 3 * * *",
+    providerId: "pi",
+    model: "moonshotai/kimi-k3.1-pro",
+    reasoningLevel: "high",
+    prompt: `Fuzz-and-fix: fuzz one input parser in this repo, and if it breaks, fix it and open a PR.
+${rotate("Fuzz-and-fix")}
+Pick code that reads outside input: request bodies, uploaded files, config, URLs, file paths, or CLI arguments. Work on a new branch. Never touch live systems or real user data, and add no new dependencies.
+Write the fuzz harness in \`/tmp/fuzz/\`, not in the repo, and install any fuzzing tool you need. Fuzz for up to 30 minutes. Look for crashes, panics, hangs, and paths that escape their folder.
+For each one: shrink the input, find the root cause, add a regression test to the existing tests, and make the smallest fix. Run that test and the nearby tests until they pass.
+When you are done:
+- Found and fixed: push the branch and open a PR with \`gh pr create\`: the input that broke it, the impact, the regression test, and the fix. Leave this thread open with the PR link.
+- Otherwise, write 1-2 lines on the target, how many inputs ran, and for how long. Then archive this thread with \`room-cli thread archive --self\`.`,
+  },
+  {
     id: "simplify-sweep",
     name: "Simplify sweep",
     description: "Finds dead and duplicate code. Checks one area per run.",

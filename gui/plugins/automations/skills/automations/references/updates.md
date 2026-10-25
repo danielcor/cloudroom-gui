@@ -12,21 +12,22 @@ Writes remain strict. Run, pause, and resume reject damaged records; update
 succeeds only when the resulting complete record is canonical. Every successful
 create/update persists the canonical format.
 
-Choose one of two execution update forms:
+Updates edit the loop in place: settings you don't pass are kept.
 
-- A complete replacement uses `--prompt`, `--provider`, and `--model` together
-  to replace the execution with an agent, or `--script`/`--script-file` to
-  replace it with a script. Add `--reasoning` and `--service-tier` when needed.
-  Include every desired mode-specific setting;
-  settings from the previous execution do not carry over, except an agent
-  automation's target thread or environment, which is kept unless you pass a
-  target flag.
-- A partial agent update preserves every omitted execution field and edits the
-  existing agent automation in place. Use any combination of `--prompt`,
-  `--provider`, `--model`, `--reasoning`, `--service-tier`, and
-  `--permission-mode accept-edits|auto|full`, then choose at most one execution
-  target. When changing providers, pass the provider's coherent model,
-  reasoning, tier, and permission selection together:
+- Script loops: pass any of `--script`/`--script-file`, `--interpreter`,
+  `--timeout`, and `--env-json`. `--env-json` replaces the whole env. The
+  interpreter is kept unless you pass `--interpreter`.
+- Agent loops: pass any of `--prompt`, `--provider`, `--model`, `--reasoning`,
+  `--service-tier`, and `--permission-mode accept-edits|auto|full`, then at
+  most one execution target. If a new provider can't use the kept permission
+  mode, reasoning level, or service tier, the update fails: pass
+  `--permission-mode`, `--reasoning`, or `--service-tier none`.
+- Switching mode replaces the execution: `--prompt`, `--provider`, and
+  `--model` together turn a script loop into an agent loop, and
+  `--script`/`--script-file` turn an agent loop into a script loop. Omitted
+  settings use defaults.
+
+Change an agent loop's target:
 
 ```bash
 room-cli automation update <automationId> --project <id> \

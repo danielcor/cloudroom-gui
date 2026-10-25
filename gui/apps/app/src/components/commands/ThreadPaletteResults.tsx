@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { ThreadListEntry } from "@cloudroom/domain";
 import { PERSONAL_PROJECT_ID } from "@cloudroom/domain";
+import { fuzzyMatchText } from "@cloudroom/fuzzy-match";
 import type { ThreadSearchMatch } from "@cloudroom/server-contract";
 import {
   resolveThreadListIndicator,
@@ -24,6 +25,7 @@ import { useThreadTitleMentionResources } from "@/components/thread/ThreadTitleM
 import { ThreadStatusGlyph } from "@/components/sidebar/ThreadRow";
 import {
   hasThreadSearchableQuery,
+  THREAD_SEARCH_LIMIT_PER_GROUP,
   useThreadSearch,
 } from "@/hooks/queries/thread-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
@@ -82,6 +84,18 @@ function searchWords(text: string): string[] {
       .toLocaleLowerCase()
       .match(/[\p{L}\p{N}_]+/gu) ?? []
   );
+}
+
+function positionsToRanges(
+  positions: readonly number[],
+): ThreadSearchMatch["highlightRanges"] {
+  const ranges: ThreadSearchMatch["highlightRanges"] = [];
+  for (const position of [...new Set(positions)].sort((a, b) => a - b)) {
+    const last = ranges.at(-1);
+    if (last !== undefined && last.end === position) last.end = position + 1;
+    else ranges.push({ start: position, end: position + 1 });
+  }
+  return ranges;
 }
 
 function isThreadTitleMatch(match: ThreadSearchMatch): boolean {
@@ -165,13 +179,15 @@ export function ThreadPaletteResults({
   );
   const { projectNamesById } = useThreadTitleMentionResources();
   const trimmedQuery = query.trim();
+  const hasQuery = trimmedQuery.length > 0;
   const liveQueryIsSearchable = hasThreadSearchableQuery(trimmedQuery);
   const threadSearch = useThreadSearch({ active: true, query });
   const searchResultsAreCurrent =
-    !liveQueryIsSearchable || threadSearch.debouncedQuery === trimmedQuery;
+    liveQueryIsSearchable && threadSearch.debouncedQuery === trimmedQuery;
   const sections = useMemo<ThreadSearchSection[]>(() => {
-    if (!liveQueryIsSearchable) {
-      const rows = recentThreads
+    if (!hasQuery) {
+      const rows = [...recentThreads]
+        .sort((left, right) => right.updatedAt - left.updatedAt)
         .slice(0, RECENT_THREAD_LIMIT)
         .map((thread): ThreadSearchRenderableRow => ({
           kind: "thread",
@@ -201,7 +217,33 @@ export function ThreadPaletteResults({
         id: `project:${project.id}`,
         project,
       }));
-    const titleRows: ThreadSearchRenderableRow[] = [];
+    const titleRows: ThreadSearchRenderableRow[] = fuzzyMatchText({
+      items: recentThreads,
+      query: trimmedQuery,
+      // NFC keeps match positions aligned with the shown title (the matcher folds accents per character).
+      getText: (thread) => getThreadDisplayTitle(thread).normalize("NFC"),
+      limit: recentThreads.length,
+    })
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          right.item.updatedAt - left.item.updatedAt,
+      )
+      .slice(0, THREAD_SEARCH_LIMIT_PER_GROUP)
+      .map(({ item: thread, positions }) => ({
+        kind: "thread",
+        id: `title:${thread.id}`,
+        thread,
+        matches: [
+          {
+            sourceKind: "title",
+            text: getThreadDisplayTitle(thread).normalize("NFC"),
+            highlightRanges: positionsToRanges(positions),
+            sourceSeq: null,
+          },
+        ],
+      }));
+    const localTitleIds = new Set(titleRows.map((row) => row.thread.id));
     const contentRows: ThreadSearchRenderableRow[] = [];
     if (searchResultsAreCurrent && threadSearch.data) {
       for (const { thread, matches } of [
@@ -217,7 +259,11 @@ export function ThreadPaletteResults({
             nameWords.some((nameWord) => nameWord.startsWith(word)),
           );
         const snippetMatch = getSnippetMatch(matches);
-        if (fullNameMatch && (titleMatch || !snippetMatch)) {
+        if (
+          fullNameMatch &&
+          (titleMatch || !snippetMatch) &&
+          !localTitleIds.has(thread.id)
+        ) {
           titleRows.push({
             kind: "thread",
             id: `title:${thread.id}`,
@@ -241,7 +287,7 @@ export function ThreadPaletteResults({
       { id: "contents", label: "Conversation content", rows: contentRows },
     ];
   }, [
-    liveQueryIsSearchable,
+    hasQuery,
     navigationQuery.data,
     recentThreads,
     searchResultsAreCurrent,
@@ -267,12 +313,11 @@ export function ThreadPaletteResults({
       threadSearch.isDebouncing ||
       (threadSearch.isLoading && threadSearch.data === undefined));
   const hasRows = rows.length > 0;
-  const showRecentLoading = !liveQueryIsSearchable && navigationQuery.isLoading;
+  const showRecentLoading = !hasQuery && navigationQuery.isLoading;
   const showError = liveQueryIsSearchable && threadSearch.isError && !isLoading;
-  const showNoSearchResults =
-    liveQueryIsSearchable && !isLoading && !showError && !hasRows;
+  const showNoSearchResults = hasQuery && !isLoading && !showError && !hasRows;
   const showTypeToSearch =
-    !liveQueryIsSearchable && !showRecentLoading && recentThreads.length === 0;
+    !hasQuery && !showRecentLoading && recentThreads.length === 0;
   const searchGroups = threadSearch.data
     ? [threadSearch.data.active, threadSearch.data.archived]
     : [];
@@ -295,7 +340,7 @@ export function ThreadPaletteResults({
           text="Loading threads..."
         />
       ) : null}
-      {isLoading ? (
+      {isLoading && !hasRows ? (
         <ThreadSearchMessage
           iconName="Spinner"
           isLoading

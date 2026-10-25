@@ -87,6 +87,7 @@ function BuiltInSidebarSection({
   return (
     <SortableSidebarSection
       id={id}
+      sectionId={id}
       label={label}
       disabled={disabled}
       actions={actions}

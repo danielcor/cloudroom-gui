@@ -34,7 +34,7 @@ import { connectAccount, registerConnect } from "./connect-relay.js";
 import { getGateAuthKind } from "../../request-context.js";
 import { noteActiveMinute, timeInApp } from "./time-in-app.js";
 import { disconnectGithub, githubAccount, githubAuth } from "./github-login.js";
-import { addGithubRepo, repoSuggestions } from "./repo-suggestions.js";
+import { addGithubRepo, githubBranches, repoSuggestions } from "./repo-suggestions.js";
 import { SETUP_ACTIONS, SETUP_AGENTS, SETUP_DETAILS, SETUP_STEPS, UPGRADE_PROMPTS } from "../system/telemetry.js";
 
 const SAFE_SETTINGS_SEARCH = /^(?=.{2,40}$)\p{L}+(?: \p{L}+){0,3}$/u;
@@ -135,8 +135,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     return context.json({ ok: true });
   });
   app.get("/api/v1/cloudroom/time-in-app", async (context) => {
-    const time = await timeInApp(deps);
-    return context.json(context.req.query("only") === "today" ? { today: time.today } : time);
+    return context.json(await timeInApp(deps));
   });
   app.post("/api/v1/cloudroom/time-in-app", async (context) => {
     z.object({}).strict().parse(await context.req.json());
@@ -419,6 +418,10 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   app.post("/api/v1/cloudroom/account/github/disconnect", async context => { await disconnectGithub(deps); return context.json({ ok: true }); });
   app.post("/api/v1/cloudroom/account/previews/check", async context => { await checkPreviewsNow(deps); return context.json({ ok: true }); });
   app.get("/api/v1/cloudroom/account/repo-suggestions", async context => context.json(await repoSuggestions(deps)));
+  app.get("/api/v1/cloudroom/account/github-branches", async context => {
+    const projectId = z.string().min(1).parse(context.req.query("project"));
+    return context.json(await githubBranches(projectId, deps));
+  });
   app.post("/api/v1/cloudroom/account/repo-suggestions/github", async context => {
     const input = z.object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/) }).strict().parse(await context.req.json());
     return context.json(await addGithubRepo(deps, input.repo));

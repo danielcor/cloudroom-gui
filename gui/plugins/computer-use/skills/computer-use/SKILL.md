@@ -30,7 +30,7 @@ come back as `screenshot_file` paths; read them with your image tool.
 
 ## Approvals
 
-- The first call that targets an app shows the user a card: allow for this thread, always allow, or deny. Pass `--purpose` so they know why.
+- The first call that targets an app shows the user a card: always allow, only this thread, or deny. Pass `--purpose` so they know why.
 - `approval_pending` (exit 3): tell the user Cloudroom is waiting for them, then run the same command again. Don't end your turn.
 - `app_denied`: stop using that app. Ask the user what to do instead.
 - `app_busy`: another thread is driving that app. Wait or pick another app.

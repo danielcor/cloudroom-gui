@@ -2,9 +2,23 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 122
+
+Faster thread switching (2026-10-25)
+
+### Changes
+
+- Cmd+E opens your last pinned thread, and you can rebind it.
+- Cmd+K shows your newest threads first across all projects, and matches titles instantly.
+- Computer use asks once per app, not once per thread.
+- Importing chats shows live progress, and setup keeps going while it runs.
+- Cloud threads finish a project copy that an app restart cut off.
+- The context ring shows how many times the context was compacted.
+- Security fixes.
+
 ## 121
 
-Steadier Mac access, smaller app (2026-10-24)
+A 110 MB smaller app (2026-10-24)
 
 ### Changes
 

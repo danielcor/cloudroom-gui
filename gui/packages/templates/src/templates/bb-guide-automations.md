@@ -49,13 +49,15 @@ apply until you run `update <automationId> --script-file <path>` again;
 print the stored copy path on the `Script:` line (`execution.storedScriptPath`
 with `--json`).
 
-`update` can combine name, schedule, and execution changes. A complete agent
-replacement supplies `--prompt`, `--provider`, and `--model`; a script
-replacement supplies a complete script source. Partial updates to an existing
-agent preserve omitted fields and accept `--prompt`, `--provider`, `--model`,
-`--reasoning`, `--service-tier default|fast|none`, `--permission-mode`, or one
-target option. Pass provider, model, reasoning, service tier, and permission
-together when switching providers.
+`update` can combine name, schedule, and execution changes, and keeps every
+setting you don't pass. An agent loop accepts any of `--prompt`, `--provider`,
+`--model`, `--reasoning`, `--service-tier default|fast|none`,
+`--permission-mode`, or one target option; if a new provider can't use the kept
+permission mode or reasoning level, pass `--permission-mode` or `--reasoning`. A script loop accepts any of
+`--script`/`--script-file`, `--interpreter`, `--timeout`, or `--env-json`
+(which replaces the whole env). Switching a loop between agent and script
+replaces its execution: pass `--prompt`, `--provider`, and `--model`, or a
+script source.
 
 Add `--json` for machine-readable output. The JSON returned by `list` and
 `show` is a union discriminated by `problem`: canonical records omit it;

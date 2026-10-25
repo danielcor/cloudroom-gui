@@ -73,6 +73,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Last thread in project",
         "Open the bottom visible sidebar thread in the active project.",
       ),
+      command(
+        "thread.lastPinned",
+        "Last pinned thread",
+        "Open the bottom thread in the Pinned section.",
+      ),
       ...THREAD_JUMP_APP_COMMAND_IDS.map((id, index) =>
         paletteHiddenCommand(
           id,
@@ -208,6 +213,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "composer.focus",
         "Focus composer",
         "Focus the active composer's input and move the caret to the end.",
+      ),
+      paletteHiddenCommand(
+        "composer.hardQueue",
+        "Queue until subagents finish",
+        "Queue the message and send it after the thread and all of its subagents finish.",
       ),
       command(
         "modelPicker.toggle",

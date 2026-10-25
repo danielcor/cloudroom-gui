@@ -37,6 +37,7 @@ import {
 } from "@cloudroom/client-core";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
 import {
+  useAppCommandHandler,
   useAppCommandKeyDispatch,
   useAppCommandShortcut,
 } from "@/components/commands/AppCommandProvider";
@@ -2848,6 +2849,17 @@ export function PromptBoxInternal({
     !isSubmitting &&
     !submitDisabled &&
     !showVoiceActionGroup;
+  useAppCommandHandler(
+    "composer.hardQueue",
+    ({ target }) => {
+      if (!(target instanceof Node)) return false;
+      if (!editorRef.current?.view.dom.contains(target)) return false;
+      if (canSubmit) onHardQueueSubmit?.();
+      return true;
+    },
+    0,
+    onHardQueueSubmit !== undefined,
+  );
   const showStop = Boolean(
     isRunning &&
       onStop &&
@@ -3210,19 +3222,6 @@ export function PromptBoxInternal({
         return true;
       }
 
-      if (
-        event.key === "Enter" &&
-        event.altKey &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.shiftKey &&
-        onHardQueueSubmit
-      ) {
-        event.preventDefault();
-        if (canSubmit) onHardQueueSubmit();
-        return true;
-      }
-
       const isBlockquoteExitKey =
         event.key === "Enter" &&
         event.shiftKey &&
@@ -3293,8 +3292,6 @@ export function PromptBoxInternal({
       loadMoreCommands,
       onEscape,
       onModifierSubmit,
-      onHardQueueSubmit,
-      canSubmit,
       postCompositionKeyDownEvents,
       resetHistorySession,
       selectedIndex,

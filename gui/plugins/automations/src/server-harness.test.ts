@@ -95,6 +95,7 @@ async function bootAutomationsPlugin(
             {
               id: "claude",
               capabilities: { permissionModes: ["auto", "full"] },
+              reasoningLevels: [{ id: "medium" }, { id: "ultra" }],
             },
           ] as never;
         },
@@ -413,6 +414,49 @@ describe("automations server plugin harness", () => {
       env: { CHANNEL: "qa" },
     });
 
+    const envOnlyResult = await harness.runCli([
+      "update",
+      created.id,
+      "--project",
+      PROJECT_ID,
+      "--env-json",
+      '{"CHANNEL":"prod"}',
+      "--json",
+    ]);
+    expect(envOnlyResult.exitCode).toBe(0);
+    expect(
+      automationResponseSchema.parse(JSON.parse(envOnlyResult.stdout ?? ""))
+        .execution,
+    ).toEqual({ ...scriptUpdated.execution, env: { CHANNEL: "prod" } });
+
+    const scriptOnlyResult = await harness.runCli([
+      "update",
+      created.id,
+      "--project",
+      PROJECT_ID,
+      "--script",
+      "echo again",
+      "--json",
+    ]);
+    expect(scriptOnlyResult.exitCode).toBe(0);
+    expect(
+      automationResponseSchema.parse(JSON.parse(scriptOnlyResult.stdout ?? ""))
+        .execution,
+    ).toMatchObject({
+      interpreter: "bash",
+      timeoutMs: 12_000,
+      env: { CHANNEL: "prod" },
+    });
+    const shown = await harness.runCli([
+      "show",
+      created.id,
+      "--project",
+      PROJECT_ID,
+    ]);
+    expect(shown.stdout).toContain("Timeout:   12000 ms");
+    expect(shown.stdout).toContain("Env:       CHANNEL");
+    expect(shown.stdout).not.toContain("prod");
+
     const errorResult = await harness.runCli([
       "create",
       "--project",
@@ -462,6 +506,24 @@ describe("automations server plugin harness", () => {
         automationId: created.id,
       }),
     ).rejects.toThrow("Script file was not found");
+
+    const repaired = await harness.runCli([
+      "update",
+      created.id,
+      "--project",
+      PROJECT_ID,
+      "--script",
+      "echo fixed",
+    ]);
+    expect(repaired.exitCode).toBe(0);
+    expect(
+      automationResponseSchema.parse(
+        await harness.callRpc("automations_get", {
+          projectId: PROJECT_ID,
+          automationId: created.id,
+        }),
+      ).execution,
+    ).toMatchObject({ script: "echo fixed" });
 
     await harness.dispose();
   });
@@ -641,11 +703,21 @@ describe("automations server plugin harness", () => {
     await harness.dispose();
   });
 
-  it("keeps the target thread when the CLI replaces the agent execution", async () => {
+  it("keeps omitted agent settings when the CLI passes prompt, provider, and model", async () => {
     const { harness } = await bootAutomationsPlugin();
     const created = await createAgentAutomation(harness, {
       targetThreadId: THREAD_ID,
     });
+    await harness.runCli([
+      "update",
+      created.id,
+      "--project",
+      PROJECT_ID,
+      "--reasoning",
+      "low",
+      "--service-tier",
+      "fast",
+    ]);
 
     const result = await harness.runCli([
       "update",
@@ -669,9 +741,29 @@ describe("automations server plugin harness", () => {
       automationResponseSchema.parse(JSON.parse(result.stdout ?? "")).execution,
     ).toMatchObject({
       prompt: "check in every minute",
+      reasoningLevel: "low",
+      serviceTier: "fast",
+      permissionMode: "accept-edits",
       environment: { type: "project-default" },
       targetThreadId: THREAD_ID,
     });
+
+    const switched = await harness.runCli([
+      "update",
+      created.id,
+      "--project",
+      PROJECT_ID,
+      "--provider",
+      "claude",
+      "--model",
+      "sonnet",
+      "--permission-mode",
+      "full",
+    ]);
+    expect(switched.exitCode).toBe(1);
+    expect(switched.stderr).toContain(
+      "Reasoning level low is not supported by provider claude",
+    );
 
     await harness.dispose();
   });

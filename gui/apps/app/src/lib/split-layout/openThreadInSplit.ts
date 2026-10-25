@@ -38,7 +38,7 @@ export function openThreadInSplit({
     navigate(route);
     return;
   }
-  const existing = findPaneByThread(layout.root, projectId, threadId);
+  const existing = findPaneByThread(layout.root, threadId);
   if (existing !== null) {
     const next = setFocus(layout, existing.paneId);
     if (next !== layout) {

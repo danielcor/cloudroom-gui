@@ -730,7 +730,8 @@ describe("electron-builder signing config", () => {
     expect(completeAppleCredentials.config.mac.identity).toBe(
       "Sawyer Hood (TEAMID1234)",
     );
-    expect(completeAppleCredentials.config.mac.notarize).toBe(true);
+    expect(completeAppleCredentials.config.mac.notarize).toBe(false);
+    expect(completeAppleCredentials.config.afterSign).toBe("scripts/notarize.cjs");
     expect(completeAppleCredentials.config.dmg.sign).toBe(true);
   });
 });

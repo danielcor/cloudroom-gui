@@ -15,6 +15,7 @@ import {
 
 import { prepareRuntimes } from "./prepare-runtimes.mjs";
 import { unregisterBundle } from "./macos-bundle.mjs";
+import notarizeHook from "./notarize.cjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const desktopPackageRoot = resolve(scriptDirectory, "..");
@@ -188,8 +189,10 @@ function resolveElectronBuilderConfig(
   const mac = {
     ...config.mac,
     icon: releaseConfig.macIconPath,
-    notarize: signingPlan.notarizationEnabled,
+    // Our afterSign hook notarizes instead, with retries (scripts/notarize.cjs).
+    notarize: false,
   };
+  if (signingPlan.notarizationEnabled) config.afterSign = "scripts/notarize.cjs";
 
   if (signingPlan.mode === "disabled") {
     mac.identity = null;
@@ -251,36 +254,14 @@ function createElectronBuilderEnv(signingPlan) {
   return childEnv;
 }
 
-function notarytoolAuthArgs(env) {
-  if (envValueIsSet(env.APPLE_KEYCHAIN_PROFILE)) {
-    return ["--keychain-profile", env.APPLE_KEYCHAIN_PROFILE.trim()];
-  }
-  return [
-    "--apple-id", env.APPLE_ID,
-    "--password", env.APPLE_APP_SPECIFIC_PASSWORD,
-    "--team-id", env.APPLE_TEAM_ID,
-  ];
-}
-
-function runXcrun(args) {
-  return new Promise((resolveRun, rejectRun) => {
-    const child = spawn("xcrun", args, { stdio: "inherit" });
-    child.on("error", rejectRun);
-    child.on("close", (code) =>
-      code === 0 ? resolveRun() : rejectRun(new Error(`xcrun ${args[0]} ${args[1]} failed (${code})`)),
-    );
-  });
-}
-
-// electron-builder notarizes and staples only the app. Notarize the DMG too, so
+// The afterSign hook notarizes and staples only the app. Notarize the DMG too, so
 // Gatekeeper trusts the download itself, even offline.
 async function notarizeDmgs(outputDirectory, builtAfterMs) {
   for (const name of await readdir(outputDirectory)) {
     const dmgPath = join(outputDirectory, name);
     if (!name.endsWith(".dmg") || (await stat(dmgPath)).mtimeMs < builtAfterMs) continue;
     console.log(`Notarizing ${name}...`);
-    await runXcrun(["notarytool", "submit", dmgPath, ...notarytoolAuthArgs(process.env), "--wait"]);
-    await runXcrun(["stapler", "staple", dmgPath]);
+    await notarizeHook.notarize(dmgPath);
   }
 }
 

@@ -27,7 +27,8 @@ const MAX_TOTAL = 1024 * 1024 * 1024;
 // About 10-20 seconds on a home connection.
 const SMALL_PROJECT = 50 * 1024 * 1024;
 export const SKIPPED = new Set(["node_modules", ".git", ".venv", "venv", ".next", ".turbo", ".cache", "__pycache__", "target", "dist", "build", ".DS_Store"]);
-const copying = new Set<string>();
+// Running copies, by copy key, with their thread.
+const copying = new Map<string, string>();
 export const FAILURE_NOTE = ".cloudroom/project-copy-failed.txt";
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
@@ -62,46 +63,61 @@ export async function localProjectNote(deps: Deps, projectId: string): Promise<s
   return `This project is not on GitHub and too large to copy, so only its \`.env\` files are here. The rest is on the user's Mac at \`${path}\`. Pull only what the task needs with \`room-cli mac pull\`.`;
 }
 
-export async function planProjectCopy(deps: Deps, client: CloudroomClient, threadId: string, workspace: string, { localPath, key = workspace, teleport = false, branch }: { localPath?: string; key?: string; teleport?: boolean; branch?: string } = {}): Promise<ProjectCopyJob | null> {
-  try {
-    const project = getProject(deps.db, getThread(deps.db, threadId)?.projectId ?? "");
-    if (!project || copying.has(key)) return null;
-    const path = localPath ?? localProjectPath(deps, project.id) ?? null;
-    const repository = githubRepository(await projectRemote(deps, project, path));
-    if (!path && !repository) return null;
-    const existing = await client.workspace(workspace);
-    const empty = !existing || (await client.runOnVm({ command: `[ -z "$(ls -A -- ${quote(existing.path)} 2>/dev/null | grep -Fvx .cloudroom)" ]`, stdin: "" })).code === 0;
-    if (!empty && teleport) return null;
-    const clone = empty && Boolean(repository);
-    const copyAll = empty && !repository && !teleport && path !== null && await smallProject(path);
-    const job = { threadId, workspace, key, localPath: path, repository, clone, copyAll, teleport, ...(branch ? { branch } : {}) };
-    return clone || copyAll || teleport || (path !== null && (await localFiles(path, "env")).length) ? job : null;
-  } catch {
-    return null;
-  }
+export function planProjectCopy(...args: Parameters<typeof planProjectCopyOrThrow>): Promise<ProjectCopyJob | null> {
+  return planProjectCopyOrThrow(...args).catch(() => null);
+}
+
+/** Like planProjectCopy, but a sandbox that can't be reached, or a folder another copy is filling, throws instead of
+ *  reading as nothing left to copy. */
+export async function planProjectCopyOrThrow(deps: Deps, client: CloudroomClient, threadId: string, workspace: string, { localPath, key = workspace, teleport = false, branch }: { localPath?: string; key?: string; teleport?: boolean; branch?: string } = {}): Promise<ProjectCopyJob | null> {
+  const project = getProject(deps.db, getThread(deps.db, threadId)?.projectId ?? "");
+  if (!project) return null;
+  if (copying.has(key)) throw new Error("Another copy is filling this project folder.");
+  const path = localPath ?? localProjectPath(deps, project.id) ?? null;
+  const repository = githubRepository(await projectRemote(deps, project, path));
+  if (!path && !repository) return null;
+  const existing = await client.workspace(workspace);
+  const empty = !existing || (await client.runOnVm({ command: `[ -z "$(ls -A -- ${quote(existing.path)} 2>/dev/null | grep -Fvx .cloudroom)" ]`, stdin: "" })).code === 0;
+  if (!empty && teleport) return null;
+  const clone = empty && Boolean(repository);
+  const copyAll = empty && !repository && !teleport && path !== null && await smallProject(path);
+  const job = { threadId, workspace, key, localPath: path, repository, clone, copyAll, teleport, ...(branch ? { branch } : {}) };
+  // A Mac folder that can't be read has no `.env` files to send, so it reads as nothing left, never as a reason to wait.
+  return clone || copyAll || teleport || (path !== null && (await localFiles(path, "env").catch(() => [])).length) ? job : null;
+}
+
+/** Whether a copy for this thread runs in this app: an app restart ends every copy, but leaves its saved progress. */
+export const copyRunning = (threadId: string) => [...copying.values()].includes(threadId);
+
+/** Saves a thread's project copy progress and refreshes its views. A thread deleted mid-copy has no row left to save to. */
+export function reportProjectCopy(deps: Deps, threadId: string, progress: ProjectCopyProgress): void {
+  const thread = getThread(deps.db, threadId);
+  if (!thread) return;
+  saveProjectCopyProgress(deps.db, threadId, progress);
+  deps.hub.notifyThread(threadId, ["status-changed"]);
+  if (thread.projectId) deps.hub.notifyProject(thread.projectId, ["threads-changed"]);
 }
 
 /** The copy shows as started at once, but its transfer waits for `after`, so it can't crowd out the first message on a slow connection.
  *  With `paused`, a copy cut off by a sleeping or unreachable sandbox waits instead of failing; the caller restarts it.
  *  `partial` says why the files are incomplete; the agent is told, not the user. */
-export function copyProject(deps: Deps, client: CloudroomClient, job: ProjectCopyJob, done?: (error?: string, partial?: string) => void, after: Promise<void> = Promise.resolve(), paused?: () => void): void {
+export function copyProject(deps: Deps, client: CloudroomClient, job: ProjectCopyJob, done?: (error?: string, partial?: string) => void | Promise<void>, after: Promise<void> = Promise.resolve(), paused?: () => void): void {
   if (copying.has(job.key)) return;
-  copying.add(job.key);
+  copying.set(job.key, job.threadId);
   const report = (progress: ProjectCopyProgress) => {
     if (!job.clone && !job.copyAll && !job.teleport && progress.phase !== "error") return;
-    saveProjectCopyProgress(deps.db, job.threadId, progress);
-    deps.hub.notifyThread(job.threadId, ["status-changed"]);
-    const projectId = getThread(deps.db, job.threadId)?.projectId;
-    if (projectId) deps.hub.notifyProject(projectId, ["threads-changed"]);
+    reportProjectCopy(deps, job.threadId, progress);
   };
   report({ phase: job.clone ? "cloning" : "uploading", completed: 0, total: 0 });
+  // Complete only once the caller landed it (its branch, a fork's code, `room-cli files wait`), so an app restart
+  // before then still resumes it (#106). A landing that fails is not a copy error.
+  const land = (error?: string, partial?: string) => Promise.resolve().then(() => done?.(error, partial)).catch(() => {});
   void after.then(() => run(deps, client, job, report))
     .then(async (partial) => {
       if (partial) await writeFailureNote(client, job, partial).catch(() => {});
+      await land(undefined, partial);
       report({ phase: "complete", completed: 0, total: 0 });
-      done?.(undefined, partial);
-    })
-    .catch(async (error: unknown) => {
+    }, async (error: unknown) => {
       if (paused && error instanceof CloudroomError && error.retryable) {
         report({ phase: "waiting", completed: 0, total: 0 });
         paused();
@@ -111,11 +127,12 @@ export function copyProject(deps: Deps, client: CloudroomClient, job: ProjectCop
       // The files are still on the Mac, so only the agent is told and pulls what it needs. The error card stays for
       // Teleport, whose uncommitted work must arrive, and for projects with no folder on the Mac.
       const quiet = job.localPath !== null && !job.teleport;
-      report(quiet ? { phase: "complete", completed: 0, total: 0 } : { phase: "error", completed: 0, total: 0, error: message });
+      if (!quiet) report({ phase: "error", completed: 0, total: 0, error: message });
       await writeFailureNote(client, job, message).catch(() => {});
-      if (quiet) done?.(undefined, message);
-      else done?.(message);
+      await (quiet ? land(undefined, message) : land(message));
+      if (quiet) report({ phase: "complete", completed: 0, total: 0 });
     })
+    .catch(() => {})
     .finally(() => copying.delete(job.key));
 }
 
@@ -147,7 +164,7 @@ async function run(deps: Deps, client: CloudroomClient, job: ProjectCopyJob, rep
       await rm(folder, { recursive: true, force: true });
     }
   }
-  if (cloneError) throw new Error(`The GitHub clone failed${scope === "all" && !partial ? ", so your files were copied without Git history" : ""}. Check that the project's GitHub remote exists and you can access it: ${cloneError}`);
+  if (cloneError) throw new Error(`The GitHub clone failed${scope === "all" && !partial ? ", so your files were copied without Git history" : ""}. ${cloneError}`);
   return partial;
 }
 
@@ -212,7 +229,7 @@ async function clone(deps: Deps, client: CloudroomClient, target: string, reposi
       "export GIT_TERMINAL_PROMPT=0",
       token ? "{ { gh auth status --hostname github.com || gh auth login --hostname github.com --with-token; } && gh auth setup-git --hostname github.com; } >/dev/null 2>&1 || true" : "",
       `rm -rf -- ${temporary}`,
-      `git clone --quiet --filter=blob:none -c gc.auto=0 -- ${quote(repository)} ${temporary} || exit 1`,
+      `git clone --quiet --filter=blob:none -c gc.auto=0 -- ${quote(repository)} ${temporary} || { printf '\\035'; timeout 10 gh api user --jq .login 2>/dev/null; exit 1; }`,
       branch && branch !== "HEAD" ? `git -C ${temporary} checkout --quiet ${quote(branch)} 2>/dev/null || true` : "",
       `mkdir -p -- ${quote(target)} && (shopt -s dotglob && mv -n -- ${temporary}/* ${quote(target)}/) || true`,
       `rm -rf -- ${temporary}`,
@@ -221,7 +238,21 @@ async function clone(deps: Deps, client: CloudroomClient, target: string, reposi
     stdin: Buffer.from(token).toString("hex"),
   });
   if (result.code === 0) return null;
-  return Buffer.from(result.stderr, "hex").toString().trim().slice(-300) || `git clone exited with code ${result.code}`;
+  const error = Buffer.from(result.stderr, "hex").toString().trim().slice(-300) || `git clone exited with code ${result.code}`;
+  const stdout = Buffer.from(result.stdout, "hex");
+  const mark = stdout.indexOf(0x1d);
+  const login = mark < 0 ? "" : stdout.subarray(mark + 1).toString().trim();
+  return `${cloneHint(error, /^[A-Za-z0-9-]{1,39}$/.test(login) ? login : "")} Git said: ${error}`;
+}
+
+function cloneHint(error: string, login: string): string {
+  const fix = "in Settings → Cloud environment → GitHub, then start a new thread";
+  if (/could not read Username/i.test(error)) return `Cloud sandboxes have no working GitHub login, so they can only clone public repositories. Connect or switch the account ${fix}.`;
+  if (/Authentication failed|Invalid username or token/i.test(error)) return `GitHub rejected the cloud's GitHub login, which may have expired. Connect or switch the account ${fix}.`;
+  if (!/repository .*not found/i.test(error)) return "Check that the project's GitHub remote exists and you can access it.";
+  return login
+    ? `Cloud sandboxes use GitHub account @${login}, which can't see this repository, or it doesn't exist. Give @${login} access, or use Switch account ${fix}.`
+    : `The cloud's GitHub login can't see this repository, or it doesn't exist. Check the account ${fix}.`;
 }
 
 const isEnv = (path: string) => basename(path).startsWith(".env");

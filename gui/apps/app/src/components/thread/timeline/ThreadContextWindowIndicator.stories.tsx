@@ -27,7 +27,7 @@ const low = {
   ],
 };
 const moderate = usage(110_000);
-const approachingLimit = usage(166_000);
+const approachingLimit = { ...usage(166_000), compactions: 2 };
 const critical = usage(192_000);
 const estimated = usage(150_000, true);
 

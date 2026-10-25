@@ -304,7 +304,7 @@ export async function sandboxGithubLogin(token: string): Promise<string> {
 
 const environmentSchema = z.object({
   variables: z.array(z.object({ name: z.string(), hint: z.string() })), setup: z.string(),
-  repos: z.array(z.string()).default([]), mcp: z.array(z.string()).default([]), available: z.array(z.string()).optional(), pushed: z.record(z.string(), z.number()).optional(), login: z.string().optional(),
+  repos: z.array(z.string()).default([]), mcp: z.array(z.string()).default([]), available: z.array(z.string()).optional(), pushed: z.record(z.string(), z.number()).optional(), ids: z.record(z.string(), z.number()).optional(), login: z.string().optional(),
 });
 export type CloudEnvironment = z.infer<typeof environmentSchema>;
 export const cloudEnvironmentRequestSchema = z.discriminatedUnion("action", [
