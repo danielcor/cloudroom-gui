@@ -78,7 +78,7 @@ function formatStatus(status: ConnectStatus): string {
     ? [
         status.signedIn
           ? `Setting up${status.lastError ? ` (${status.lastError})` : ""}`
-          : "Sign in to Cloudroom to use it on your phone.",
+          : (status.lastError ?? "Sign in to Cloudroom to use it on your phone."),
       ]
     : [`${status.url}  ${status.state}`];
   if (status.paired && status.lastError !== null && status.state !== "connected") {

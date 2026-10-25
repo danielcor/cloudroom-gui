@@ -507,7 +507,7 @@ function PhoneTab({ status }: { status: ConnectStatus }) {
   if (!status.signedIn) {
     return (
       <p className="text-sm text-muted-foreground">
-        Sign in to Cloudroom to use it on your phone.
+        {status.lastError ?? "Sign in to Cloudroom to use it on your phone."}
       </p>
     );
   }
@@ -660,7 +660,7 @@ function SettingsTab({ status }: { status: ConnectStatus }) {
 function StatusBadge({ status }: { status: ConnectStatus }) {
   const [tone, label, detail]: ["ok" | "warn" | "muted", string, string | null] =
     !status.signedIn
-      ? ["muted", "Signed out", null]
+      ? ["muted", "Signed out", status.lastError]
       : !status.paired
         ? ["warn", "Setting up…", status.lastError]
         : status.state !== "connected"

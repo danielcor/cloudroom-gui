@@ -295,8 +295,8 @@ export interface CloudroomArea {
   stopSharingThread(threadId: string): Promise<void>;
   /** Copies a shared thread into a new Local thread that starts by reading it. */
   continueShare(link: string): Promise<{ threadId: string; projectId: string }>;
-  /** The signed-in Cloudroom account, for Cloudroom Connect. */
-  connectAccount(): Promise<{ accountId: string | null }>;
+  /** The signed-in Cloudroom account, for Cloudroom Connect. `blocked` says why this Mac can't use Connect. */
+  connectAccount(): Promise<{ accountId: string | null; blocked?: string }>;
   /** Registers this Mac with Cloudroom Connect on cloudroom.run and returns its tunnel credential. */
   connectRegister(): Promise<CloudroomConnectRegistration>;
 }
@@ -397,7 +397,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     shareThread: (threadId) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/share`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save" }) })) as Promise<ThreadShare>,
     stopSharingThread: (threadId) => transport.readVoid(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/share`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stop" }) })),
     continueShare: (link) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/shares/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link }) })) as Promise<{ threadId: string; projectId: string }>,
-    connectAccount: () => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/connect`)) as Promise<{ accountId: string | null }>,
+    connectAccount: () => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/connect`)) as Promise<{ accountId: string | null; blocked?: string }>,
     connectRegister: () => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/connect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })) as Promise<CloudroomConnectRegistration>,
     retryStart: (threadId) => transport.readVoid(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/retry-start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })),
   };

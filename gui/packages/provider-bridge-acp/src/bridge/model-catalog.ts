@@ -207,6 +207,36 @@ export function buildAcpNativeReasoningSupport(
   };
 }
 
+const MODEL_ID_WORDS: Readonly<Record<string, string>> = {
+  gpt: "GPT",
+  glm: "GLM",
+  deepseek: "DeepSeek",
+  minimax: "MiniMax",
+  mimo: "MiMo",
+};
+
+// fx names models by raw id: "moonshotai/kimi-k3.1-pro" -> "Kimi K3.1 Pro".
+function configOptionModelName(
+  value: string,
+  name: string | undefined,
+): string {
+  if ((name ?? value) !== value || !value.includes("/")) {
+    return name ?? value;
+  }
+  return value
+    .slice(value.indexOf("/") + 1)
+    .split("-")
+    .map(
+      (word) =>
+        MODEL_ID_WORDS[word] ??
+        (/^o\d/.test(word)
+          ? word
+          : word.charAt(0).toUpperCase() + word.slice(1)),
+    )
+    .join(" ")
+    .replace(/^GPT (?=\d)/, "GPT-");
+}
+
 export function buildModelCatalogFromConfigOptions(
   modelOption: AcpConfigOption | undefined,
   reasoningByModel?: ReadonlyMap<string, AcpNativeReasoningSupport>,
@@ -226,7 +256,7 @@ export function buildModelCatalogFromConfigOptions(
     return {
       id: option.value,
       model: option.value,
-      displayName: option.name ?? option.value,
+      displayName: configOptionModelName(option.value, option.name),
       description: "",
       supportedReasoningEfforts: reasoning.supportedReasoningEfforts,
       defaultReasoningEffort: reasoning.defaultReasoningEffort,

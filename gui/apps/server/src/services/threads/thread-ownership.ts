@@ -186,7 +186,7 @@ function releaseChildInTransaction(
   return updatedThread;
 }
 
-export function unarchiveThreadAsTopLevel(
+export function unarchiveThreadKeepingOpenParent(
   deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db" | "hub">,
   threadId: string,
   keepParent = false,
@@ -199,7 +199,11 @@ export function unarchiveThreadAsTopLevel(
         return thread;
       }
       const parent = getThread(tx, thread.parentThreadId);
-      if (keepParent && parent && parent.deletedAt === null) {
+      if (
+        parent &&
+        parent.deletedAt === null &&
+        (keepParent || parent.archivedAt === null)
+      ) {
         return thread;
       }
       return releaseChildInTransaction(

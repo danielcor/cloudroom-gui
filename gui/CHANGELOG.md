@@ -2,9 +2,23 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 123
+
+Hand off long Local runs (2026-10-25)
+
+### Changes
+
+- If you haven't used Cloud lately, Cloudroom suggests it for new and long-running Local threads, so you can close your laptop.
+- A new setting hides the thread purpose card in the sidebar.
+- Cloudroom no longer quits if your Mac sleeps while it starts.
+- Claude sign-in works on Fedora.
+- Cloud previews and sync no longer stall on an old, retired cloud machine.
+- Unarchived subagents stay under their parent thread.
+- Security fixes.
+
 ## 122
 
-Faster thread switching (2026-10-25)
+Jump back with Cmd+E (2026-10-25)
 
 ### Changes
 

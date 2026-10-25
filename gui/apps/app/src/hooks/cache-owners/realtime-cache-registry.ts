@@ -52,6 +52,7 @@ import {
   environmentDiffFilesQueryKeyPrefix,
   environmentFilePreviewQueryKeyPrefix,
   environmentPullRequestQueryKey,
+  threadFileExistenceQueryKeyPrefix,
   environmentWorkStatusQueryKeyPrefix,
   hostProviderCliStatusQueryKey,
   hostsQueryKey,
@@ -351,6 +352,7 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
       dirtyThreadSearchQueriesForCompletedTurn,
       dirtyThreadTimelineQueries,
       dirtyThreadPullRequestQueryForCompletedTurn,
+      dirtyThreadFileExistenceQueries,
       dirtyThreadTurnRequestQueries,
     ],
   },
@@ -376,7 +378,11 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   },
   "status-changed": {
     flush: "immediate",
-    dirty: [patchThreadListStatusState, dirtyThreadDetailQueries],
+    dirty: [
+      patchThreadListStatusState,
+      dirtyThreadDetailQueries,
+      dirtyThreadFileExistenceQueries,
+    ],
   },
   "title-changed": {
     flush: "debounced",
@@ -957,6 +963,16 @@ function dirtyThreadTerminalQueries({
   return threadId
     ? [terminalsQueryKey({ kind: "thread", threadId })]
     : [allTerminalsQueryKeyPrefix()];
+}
+
+function dirtyThreadFileExistenceQueries({
+  eventTypes,
+  statusChange,
+  threadId,
+}: ThreadRealtimeDirtyContext): QueryKey[] {
+  if (!threadId) return [];
+  if (!statusChange && !eventTypes?.includes("turn/completed")) return [];
+  return [threadFileExistenceQueryKeyPrefix(threadId)];
 }
 
 function dirtyThreadStorageQueriesForThread({

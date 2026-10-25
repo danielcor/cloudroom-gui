@@ -86,6 +86,7 @@ export interface NewThreadEnvironmentConfig {
   isLocal: EnvironmentPickerUIProps["isLocal"];
   machines?: EnvironmentPickerMachines | null;
   cloud?: EnvironmentPickerUIProps["cloud"];
+  hint?: ReactNode;
   onRequestMachineSetup?: (host: Host) => void;
   disabled?: boolean;
   isLoading?: boolean;
@@ -511,8 +512,7 @@ export function EnvironmentSlot({
     return <ProjectlessMachineSlot environment={environment} />;
   }
 
-  return (
-    <>
+  const picker = (
       <EnvironmentPickerUI
         value={environment.value}
         projectless={projectless}
@@ -538,6 +538,10 @@ export function EnvironmentSlot({
         className="shrink-0"
         muted
       />
+  );
+  return (
+    <>
+      {environment.hint ? <div className="relative shrink-0">{picker}{environment.hint}</div> : picker}
       {showReuseEnvironmentPicker ? (
         <ReuseEnvironmentPicker
           muted

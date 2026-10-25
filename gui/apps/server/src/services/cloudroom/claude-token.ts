@@ -1,9 +1,9 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { findCliExecutable } from "@cloudroom/process-utils";
-import { readClaudeToken, screenText } from "@cloudroom/process-utils/claude-token";
+import { NO_TERMINAL, readClaudeToken, screenText, spawnInTerminal } from "@cloudroom/process-utils/claude-token";
 import { ApiError } from "../../errors.js";
 import { cliPlace, reportAgentConnect, reportCliInstall, scrub } from "./setup-telemetry.js";
 
@@ -103,12 +103,13 @@ function runSetupToken(id: string, save: (token: string) => Promise<unknown>): T
   const dir = mkdtempSync(join(tmpdir(), "cloudroom-claude-"));
   const browser = join(dir, "open");
   writeFileSync(browser, `#!/bin/sh\nprintf '%s' "$1" > "$0.url"\n`, { mode: 0o700 });
-  // setup-token needs a terminal, and `script` needs a real pipe as input. A wide terminal keeps the token on one line.
-  // macOS and Linux `script` take the command differently. `kill 0` ends the `sleep` if Claude exits early.
-  const command = `stty cols 1000; exec "$CLAUDE_BIN" setup-token`;
-  const tty = process.platform === "linux" ? `/usr/bin/script -q -c '${command}' /dev/null` : `/usr/bin/script -q /dev/null /bin/sh -c '${command}'`;
-  const env = { ...process.env, CLAUDE_BIN: binary, SHELL: "/bin/sh", BROWSER: browser };
-  const child = spawn("/bin/sh", ["-c", `sleep 600 | { ${tty}; kill 0; }`], { env, stdio: ["ignore", "pipe", "ignore"], detached: true });
+  // A wide terminal keeps the token on one line.
+  const child = spawnInTerminal(`stty cols 1000; exec "$CLAUDE_BIN" setup-token`, { ...process.env, CLAUDE_BIN: binary, BROWSER: browser });
+  if (!child) {
+    rmSync(dir, { recursive: true, force: true });
+    reportAgentConnect("claude", "failed", { code: "missing_terminal", cliPlace: cliPlace(binary) });
+    throw failed(NO_TERMINAL);
+  }
   const stopChild = () => { try { process.kill(-child.pid!); } catch { /* already gone */ } };
   const run: TokenRun = { id, url: null, error: null, done: false, stop: () => finish("Claude sign-in was cancelled.") };
   let output = "";

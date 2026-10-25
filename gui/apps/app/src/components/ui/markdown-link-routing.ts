@@ -45,6 +45,7 @@ export interface MarkdownLocalFileLinkRouting {
   absoluteLinks: MarkdownAbsoluteLocalFileLinkRouting;
   onOpenLink: MarkdownPreviewLocalFileLinkHandler;
   relativeLinks?: MarkdownRelativeLocalFileLinkRouting;
+  threadId?: string;
 }
 
 export interface MarkdownLocalImageRouting {

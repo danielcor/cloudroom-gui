@@ -11,8 +11,8 @@ export function checkCommand(command) {
     ["disabling root-deletion protection", new RegExp(start + String.raw`rm` + end + String.raw`[^;&|\n]*--no-preserve-root`, "m")],
     ["formatting a disk", new RegExp(start + String.raw`mkfs(?:\.[\w]+)?` + end, "m")],
     ["erasing or repartitioning a disk", new RegExp(start + String.raw`diskutil` + end + String.raw`\s+(?:erase\w*|partitionDisk|zeroDisk|secureErase|apfs\s+(?:delete|erase)\w*)\b`, "m")],
-    ["writing directly to a disk", new RegExp(start + String.raw`dd` + end + String.raw`[^;&|\n]*\bof=["']?/dev/(?:r?disk|sd[a-z]|nvme|vd[a-z]|hd[a-z])`, "m")],
-    ["writing directly to a disk", />\s*["']?\/dev\/(?:r?disk|sd[a-z]|nvme|vd[a-z]|hd[a-z])/m],
+    ["writing directly to a disk", new RegExp(start + String.raw`dd` + end + String.raw`[^;&|\n]*\bof=["']?/dev/(?:r?disk|sd[a-z]|xvd[a-z]|nvme|vd[a-z]|hd[a-z]|mmcblk[0-9]+)`, "m")],
+    ["writing directly to a disk", />\s*["']?\/dev\/(?:r?disk|sd[a-z]|xvd[a-z]|nvme|vd[a-z]|hd[a-z]|mmcblk[0-9]+)/m],
     ["deleting a hosted repository", new RegExp(start + String.raw`gh` + end + String.raw`\s+repo\s+delete(?=\s|$)`, "m")],
     ["starting a fork bomb", /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/m],
   ];

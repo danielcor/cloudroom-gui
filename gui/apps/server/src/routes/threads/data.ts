@@ -1,5 +1,8 @@
 import { cloudroom, isCloudThread } from "../../services/cloudroom/commands.js";
-import { cloudFile } from "../../services/cloudroom/teleport-local.js";
+import {
+  cloudFile,
+  cloudFilesExist,
+} from "../../services/cloudroom/teleport-local.js";
 import { extractThreadContextWindowUsage } from "@cloudroom/thread-view";
 import mimeTypes from "mime-types";
 import { clearTimelineOrderingContextCache } from "../../services/threads/timeline-context-order.js";
@@ -326,7 +329,7 @@ async function serveThreadWorktreeRawFile(
 }
 
 export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
-  const { get, patch } = typedRoutes<PublicApiSchema>(app, {
+  const { get, patch, post } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.threads;
@@ -804,6 +807,26 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         createDaemonFileContentResponse(result, {
           ifNoneMatch: context.req.header("if-none-match"),
         }),
+    );
+  });
+
+  post(routes.hostFilesExist, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    if (isCloudThread(thread)) {
+      return context.json({
+        existence: await cloudFilesExist(deps, thread.id, payload.paths),
+      });
+    }
+    if (!thread.environmentId) {
+      return context.json({ existence: {} });
+    }
+    const environment = requireEnvironment(deps.db, thread.environmentId);
+    return context.json(
+      await callHostRetryableOnlineRpc(deps, {
+        hostId: environment.hostId,
+        timeoutMs: COMMAND_TIMEOUT_MS,
+        command: { type: "host.paths_exist", paths: payload.paths },
+      }),
     );
   });
 

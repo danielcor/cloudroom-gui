@@ -27,7 +27,9 @@ export async function copyLogins(deps: Deps): Promise<boolean | null> {
 }
 export async function setCopyLogins(deps: Deps, enabled: boolean): Promise<void> {
   await writeFile(copyLoginsFile(deps), JSON.stringify({ enabled }), { mode: 0o600 });
-  if (await readFile(join(folder(deps), "config.json")).then(() => true, () => false)) await setupSync(deps);
+  // This VM sync needs a VM. Sandbox-only accounts copy logins on wake instead (commands.ts syncLogins).
+  const vm = await readFile(join(deps.config.dataDir, "cloudroom.json"), "utf8").then((text) => Boolean(JSON.parse(text).url), () => false);
+  if (vm && await readFile(join(folder(deps), "config.json")).then(() => true, () => false)) await setupSync(deps);
 }
 
 /** False once the user disconnected GitHub or picked another account in Settings, so this Mac's `gh` login stops replacing it. */

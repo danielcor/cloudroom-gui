@@ -26,6 +26,7 @@ import {
   useSystemConfig,
   useSystemExecutionOptions,
 } from "@/hooks/queries/system-queries";
+import { threadPurposeShowInSidebarAtom } from "@/components/thread/ThreadPurposeHoverCard";
 import { createSyncedPreferenceAtom } from "@/lib/ui-preferences/synced-preference-atom";
 import {
   SETTINGS_DROPDOWN_CONTENT_CLASS,
@@ -249,6 +250,9 @@ export function ThreadPurposeSettingsSection() {
   const [enabled, setEnabled] = useAtom(threadPurposeEnabledAtom);
   const [model, setModel] = useAtom(threadPurposeModelAtom);
   const [effort, setEffort] = useAtom(threadPurposeEffortAtom);
+  const [showInSidebar, setShowInSidebar] = useAtom(
+    threadPurposeShowInSidebarAtom,
+  );
 
   return (
     <SettingsSection
@@ -268,6 +272,16 @@ export function ThreadPurposeSettingsSection() {
         </SettingsWithControl>
         {enabled ? (
           <>
+            <SettingsWithControl
+              label="Show in sidebar"
+              description="Preview the purpose when you hover a sidebar thread for 1.5s. Hovering the open thread's title always works."
+            >
+              <Switch
+                aria-label="Show thread purpose in sidebar"
+                checked={showInSidebar}
+                onCheckedChange={setShowInSidebar}
+              />
+            </SettingsWithControl>
             <ThreadNamingModelPicker
               harnessDescription="Default: Haiku 5.5 on Claude Code, or GPT-6 Luna on Codex without Claude."
               scope="Thread purpose"

@@ -700,6 +700,8 @@ describe("AutomationOverviewView", () => {
         templates={{
           projects: [{ id: "proj_1", name: "Repo one", path: "/repo-one" }],
           onAdd,
+          locked: false,
+          onUpgrade: () => {},
         }}
       />,
     );

@@ -69,6 +69,7 @@ const HOST_PROVIDER_CLI_STATUS_QUERY_KEY = "hostProviderCliStatus";
 const SYSTEM_USAGE_LIMITS_QUERY_KEY = "systemUsageLimits";
 const SYSTEM_PROVIDER_STATES_QUERY_KEY = "systemProviderStates";
 const HOST_PATH_EXISTENCE_QUERY_KEY = "hostPathExistence";
+const THREAD_FILE_EXISTENCE_QUERY_KEY = "threadFileExistence";
 const PROJECT_SKILLS_QUERY_KEY = "projectSkills";
 export const SKILL_CONTENT_QUERY_KEY = "skillContent";
 export const SKILL_FILES_QUERY_KEY = "skillFiles";
@@ -1205,6 +1206,17 @@ export function hostPathExistenceQueryKey(
   paths: readonly string[],
 ): HostPathExistenceQueryKey {
   return [HOST_PATH_EXISTENCE_QUERY_KEY, hostId, paths];
+}
+
+export function threadFileExistenceQueryKeyPrefix(threadId: string) {
+  return [THREAD_FILE_EXISTENCE_QUERY_KEY, threadId] as const;
+}
+
+export function threadFileExistenceQueryKey(
+  threadId: string | null,
+  path: string | null,
+) {
+  return [THREAD_FILE_EXISTENCE_QUERY_KEY, threadId, path] as const;
 }
 
 export function hostPathExistenceQueryKeyPrefix(): HostPathExistenceQueryKeyPrefix {

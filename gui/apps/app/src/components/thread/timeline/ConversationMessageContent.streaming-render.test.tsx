@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PluginMessageDirectiveProps } from "@get-bb/plugin-sdk";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import {
@@ -46,30 +47,32 @@ function assistant(
   showActions = false,
 ) {
   return (
-    <MemoryRouter>
-      <RouteNavigationProvider>
-        <ThreadTitleMentionResourcesProvider
-          sectionNamesById={new Map()}
-          projectNamesById={new Map()}
-          threadById={new Map([[mentionedThread.id, mentionedThread]])}
-        >
-          <MessageDirectiveRegistryProvider registry={registry}>
-            <ConversationMessageContent
-              role="assistant"
-              attachments={null}
-              id="msg_stream"
-              threadId="thr_stream"
-              turnId="turn_stream"
-              streaming={streaming}
-              showActions={showActions}
-              mobileActionDisplay="inline"
-              onOpenLocalFileLink={onOpenLocalFileLink}
-              text={text}
-            />
-          </MessageDirectiveRegistryProvider>
-        </ThreadTitleMentionResourcesProvider>
-      </RouteNavigationProvider>
-    </MemoryRouter>
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <RouteNavigationProvider>
+          <ThreadTitleMentionResourcesProvider
+            sectionNamesById={new Map()}
+            projectNamesById={new Map()}
+            threadById={new Map([[mentionedThread.id, mentionedThread]])}
+          >
+            <MessageDirectiveRegistryProvider registry={registry}>
+              <ConversationMessageContent
+                role="assistant"
+                attachments={null}
+                id="msg_stream"
+                threadId="thr_stream"
+                turnId="turn_stream"
+                streaming={streaming}
+                showActions={showActions}
+                mobileActionDisplay="inline"
+                onOpenLocalFileLink={onOpenLocalFileLink}
+                text={text}
+              />
+            </MessageDirectiveRegistryProvider>
+          </ThreadTitleMentionResourcesProvider>
+        </RouteNavigationProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 

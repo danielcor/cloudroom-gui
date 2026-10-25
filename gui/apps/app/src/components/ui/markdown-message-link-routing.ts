@@ -49,6 +49,7 @@ export function buildMarkdownMessageLinkRouting({
     const localFile: MarkdownLocalFileLinkRouting = {
       absoluteLinks: { kind: "trusted-host" },
       onOpenLink: onOpenLocalFileLink,
+      ...(threadId === undefined ? {} : { threadId }),
     };
     if (workspaceRootPath !== undefined) {
       localFile.relativeLinks = {

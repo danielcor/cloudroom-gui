@@ -35,6 +35,8 @@ export const cloudroomStatusSchema = z.object({
   queue_reorder: z.boolean().default(false),
   /** The account's place in the cloud queue, or a blocked region: new Cloud threads wait (docs/scopes/public-launch.md). */
   cloudQueue: z.object({ position: z.number(), total: z.number(), regionBlocked: z.boolean() }).nullable().default(null),
+  usedCloud: z.boolean().default(true),
+  lastCloudAt: z.number().nullable().optional(),
   harnesses: z.array(z.object({
     id: z.string(),
     provider: z.string().nullable().optional(),

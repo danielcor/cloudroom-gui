@@ -35,6 +35,9 @@ interface InvalidServerMessageArgs {
   error: Error;
 }
 
+const STARTUP_TIMEOUT_TICK_MS = 1_000;
+const MAX_AWAKE_STARTUP_TICK_GAP_MS = 10_000;
+
 const invalidHostRpcRequestEnvelopeSchema = z
   .object({
     type: z.literal("host-rpc.request"),
@@ -430,23 +433,38 @@ export class ServerConnection {
       let settled = false;
       let hasOpened = false;
 
-      const startupTimer = setTimeout(() => {
-        if (this.protocolMismatchObserved) {
-          return;
-        }
-        fail(
-          new Error(
-            `Server connection timed out after ${this.startupTimeoutMs}ms`,
-          ),
-        );
-      }, this.startupTimeoutMs);
+      let awakeMs = 0;
+      let lastTickAt = Date.now();
+      const startupTimer = setInterval(
+        () => {
+          const now = Date.now();
+          const gapMs = now - lastTickAt;
+          lastTickAt = now;
+          if (gapMs <= MAX_AWAKE_STARTUP_TICK_GAP_MS) {
+            awakeMs += gapMs;
+          }
+          if (awakeMs < this.startupTimeoutMs) {
+            return;
+          }
+          clearInterval(startupTimer);
+          if (this.protocolMismatchObserved) {
+            return;
+          }
+          fail(
+            new Error(
+              `Server connection timed out after ${this.startupTimeoutMs}ms`,
+            ),
+          );
+        },
+        Math.min(STARTUP_TIMEOUT_TICK_MS, this.startupTimeoutMs),
+      );
 
       const fail = (error: unknown) => {
         if (settled) {
           return;
         }
         settled = true;
-        clearTimeout(startupTimer);
+        clearInterval(startupTimer);
         void this.shutdown();
         reject(normalizeCaughtError(error));
       };
@@ -462,7 +480,7 @@ export class ServerConnection {
         const handleOpen = async () => {
           hasOpened = true;
           this.sessionInvalidationInProgress = false;
-          clearTimeout(startupTimer);
+          clearInterval(startupTimer);
           this.resetHeartbeat();
           this.options.setSession?.(session);
           this.options.logger.info(

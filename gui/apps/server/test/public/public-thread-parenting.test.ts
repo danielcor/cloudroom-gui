@@ -101,6 +101,41 @@ describe("public thread parenting routes", () => {
     },
   );
 
+  it.each([
+    { parentArchived: false, expectedParent: true },
+    { parentArchived: true, expectedParent: false },
+  ])(
+    "unarchives a child under its parent only while the parent is open (parent archived: $parentArchived)",
+    async ({ parentArchived, expectedParent }) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+        const parent = seedThread(harness.deps, { projectId: project.id });
+        const child = seedThread(harness.deps, {
+          projectId: project.id,
+          parentThreadId: parent.id,
+        });
+        archiveThread(harness.db, harness.deps.hub, child.id);
+        if (parentArchived) {
+          archiveThread(harness.db, harness.deps.hub, parent.id);
+        }
+
+        const response = await harness.app.request(
+          `/api/v1/threads/${child.id}/unarchive`,
+          { method: "POST" },
+        );
+
+        expect(response.status).toBe(200);
+        expect(getThread(harness.db, child.id)).toMatchObject({
+          archivedAt: null,
+          parentThreadId: expectedParent ? parent.id : null,
+        });
+      });
+    },
+  );
+
   it("does not expose the removed parent-only archive endpoint", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);

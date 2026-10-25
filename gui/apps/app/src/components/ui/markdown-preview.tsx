@@ -114,6 +114,7 @@ import { MarkdownMermaidDiagram } from "./markdown-mermaid-diagram.js";
 import type { PromptTextMention } from "@cloudroom/domain";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import type { TimelineTitleLinkResolver } from "@/components/thread/timeline/TimelineTitleView.js";
+import { useThreadFileExists } from "@/hooks/queries/host-path-queries";
 import { useBrowserDimmingOverlay } from "@/hooks/useBrowserDimmingModal";
 import { usePreferredTheme, type Theme } from "@/hooks/useTheme";
 import {
@@ -362,6 +363,7 @@ function areMarkdownLocalFileLinkRoutingsEqual({
   if (previous === undefined || next === undefined) return false;
   return (
     previous.onOpenLink === next.onOpenLink &&
+    previous.threadId === next.threadId &&
     areMarkdownAbsoluteLocalFileLinkRoutingsEqual({
       next: next.absoluteLinks,
       previous: previous.absoluteLinks,
@@ -574,19 +576,20 @@ function hasMarkdownFileExtension(path: string): boolean {
   return /\.(?:md|markdown)$/iu.test(path);
 }
 
-function resolveInlineCodeMarkdownFileHref({
+function resolveInlineCodeMarkdownFileTarget({
   codeText,
   localFileRouting,
 }: {
   codeText: string;
   localFileRouting: MarkdownLocalFileLinkRouting | undefined;
-}): string | null {
+}): ResolvedMarkdownLocalFileTarget | null {
   if (
     localFileRouting === undefined ||
     codeText.length === 0 ||
     codeText.trim() !== codeText ||
     codeText.includes("\n") ||
-    codeText.includes("\r")
+    codeText.includes("\r") ||
+    !/[\\/]/u.test(codeText)
   ) {
     return null;
   }
@@ -597,7 +600,7 @@ function resolveInlineCodeMarkdownFileHref({
     localFileRouting.relativeLinks,
   );
   return target !== null && hasMarkdownFileExtension(target.link.path)
-    ? target.href
+    ? target
     : null;
 }
 
@@ -673,17 +676,47 @@ function MarkdownAnchor({
       ) : null}
     </RouteAnchor>
   );
-  if (contextMenuItems === null || contextMenuItems.length === 0) {
-    return anchor;
+  const link =
+    contextMenuItems === null || contextMenuItems.length === 0 ? (
+      anchor
+    ) : (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{anchor}</ContextMenuTrigger>
+        <ContextMenuContent className="min-w-44">
+          {contextMenuItems.map(renderMarkdownLocalFileContextMenuItem)}
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  if (localFileLink === null || localFileRouting?.threadId === undefined) {
+    return link;
   }
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{anchor}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-44">
-        {contextMenuItems.map(renderMarkdownLocalFileContextMenuItem)}
-      </ContextMenuContent>
-    </ContextMenu>
+    <ThreadFileExistenceGate
+      missing={<span>{children}</span>}
+      path={localFileLink.path}
+      threadId={localFileRouting.threadId}
+      unknown={link}
+    >
+      {link}
+    </ThreadFileExistenceGate>
   );
+}
+
+function ThreadFileExistenceGate({
+  children,
+  missing,
+  path,
+  threadId,
+  unknown,
+}: {
+  children: ReactNode;
+  missing: ReactNode;
+  path: string;
+  threadId: string;
+  unknown: ReactNode;
+}) {
+  const exists = useThreadFileExists(threadId, path);
+  return exists === null ? unknown : exists ? children : missing;
 }
 
 function renderMarkdownLocalFileContextMenuItem(
@@ -768,26 +801,40 @@ function MarkdownCode({
     );
   }
 
-  const markdownFileHref = resolveInlineCodeMarkdownFileHref({
+  const localFileRouting = linkRouting?.localFile;
+  const markdownFileTarget = resolveInlineCodeMarkdownFileTarget({
     codeText,
-    localFileRouting: linkRouting?.localFile,
+    localFileRouting,
   });
-  if (markdownFileHref !== null) {
-    return (
-      <MarkdownAnchor
-        href={markdownFileHref}
-        linkRouting={linkRouting}
-        rewriteLocalhostLinks={rewriteLocalhostLinks}
-      >
-        {codeText}
-      </MarkdownAnchor>
-    );
-  }
-
-  return (
+  const inlineCode = (
     <MarkdownInlineCode codeText={codeText} {...props}>
       {children}
     </MarkdownInlineCode>
+  );
+  if (markdownFileTarget === null) {
+    return inlineCode;
+  }
+  const link = (
+    <MarkdownAnchor
+      href={markdownFileTarget.href}
+      linkRouting={linkRouting}
+      rewriteLocalhostLinks={rewriteLocalhostLinks}
+    >
+      {codeText}
+    </MarkdownAnchor>
+  );
+  if (localFileRouting?.threadId === undefined) {
+    return link;
+  }
+  return (
+    <ThreadFileExistenceGate
+      missing={inlineCode}
+      path={markdownFileTarget.link.path}
+      threadId={localFileRouting.threadId}
+      unknown={inlineCode}
+    >
+      {link}
+    </ThreadFileExistenceGate>
   );
 }
 

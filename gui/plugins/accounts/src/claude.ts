@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   accessSync,
@@ -13,7 +13,11 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { readClaudeToken } from "@cloudroom/process-utils/claude-token";
+import {
+  NO_TERMINAL,
+  readClaudeToken,
+  spawnInTerminal,
+} from "@cloudroom/process-utils/claude-token";
 import type { UsageWindow } from "./contract.js";
 import { readReset, SignInAgainError, type Secret } from "./tokens.js";
 
@@ -73,20 +77,15 @@ export class ClaudeLogin {
       mode: 0o700,
     });
     const command = `stty cols 1000; exec "$CLAUDE_BIN" ${profile ? "auth login --claudeai" : "setup-token"}`;
-    const tty =
-      process.platform === "linux"
-        ? `/usr/bin/script -q -c '${command}' /dev/null`
-        : `/usr/bin/script -q /dev/null /bin/sh -c '${command}'`;
-    const child = spawn("/bin/sh", ["-c", `sleep 600 | { ${tty}; kill 0; }`], {
-      env: {
-        ...(profile ? profileEnv(profile) : process.env),
-        CLAUDE_BIN: binary,
-        SHELL: "/bin/sh",
-        BROWSER: browser,
-      },
-      stdio: ["ignore", "pipe", "ignore"],
-      detached: true,
+    const child = spawnInTerminal(command, {
+      ...(profile ? profileEnv(profile) : process.env),
+      CLAUDE_BIN: binary,
+      BROWSER: browser,
     });
+    if (!child) {
+      rmSync(dir, { recursive: true, force: true });
+      throw new Error(NO_TERMINAL);
+    }
     const sessionId = randomUUID();
     const run: Run = { url: null, result: null, error: null, stop: () => {} };
     const finish = (error: string | null) => {

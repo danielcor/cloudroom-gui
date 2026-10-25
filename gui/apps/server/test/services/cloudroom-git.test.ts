@@ -272,3 +272,41 @@ it("serves a Cloud thread's Git status and diff through the environment API, and
     service.stop(); core.closeAllConnections(); await new Promise<void>(resolve => core.close(() => resolve())); await harness.cleanup();
   }
 }, 30000);
+
+it("checks which files exist in a Cloud thread's sandbox, past login-shell output", async () => {
+  const harness = await createTestAppHarness();
+  const { host } = seedHostSession(harness.deps);
+  const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
+  const service = cloudroom(harness.deps);
+  const core = createServer(async (req, res) => {
+    const json = (body: unknown) => { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
+    if (req.url === "/v1/capabilities") return json({ version: 1, repository: repo, stop: true, resume: true, launch_settings: true, harnesses: [] });
+    if (req.url === "/v1/ready") return json({ ready: true });
+    if (req.url === "/v1/vm/run") {
+      let text = "";
+      for await (const chunk of req) text += chunk;
+      const input = JSON.parse(text) as { command: string };
+      const result = spawnSync("/bin/bash", ["-c", input.command]);
+      return json({ code: result.status, stdout: Buffer.concat([Buffer.from("Welcome banner\n1\n"), result.stdout]).toString("hex"), stderr: "", truncated: false });
+    }
+    res.writeHead(404); res.end();
+  });
+  core.listen(0, "127.0.0.1"); await once(core, "listening");
+  const address = core.address();
+  if (!address || typeof address === "string") throw new Error("fixture did not listen");
+  const url = `http://127.0.0.1:${address.port}`;
+  try {
+    await service.configure({ url, token: "x".repeat(40) });
+    const thread = createThread(harness.deps.db, harness.deps.hub, { executionTarget: "cloud", projectId: project.id, providerId: "codex", status: "idle" });
+    harness.deps.db.insert(cloudroomThreads).values({ threadId: thread.id, coreUrl: url, startRequestId: "exist", sessionId: "cr_exist", model: "test-model", reasoning: "medium" }).run();
+    const response = await harness.app.request(`/api/v1/threads/${thread.id}/host-files/exist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: [join(repo, "keep.txt"), join(repo, "missing.md"), "relative.md"] }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ existence: { [join(repo, "keep.txt")]: true, [join(repo, "missing.md")]: false } });
+  } finally {
+    service.stop(); core.closeAllConnections(); await new Promise<void>(resolve => core.close(() => resolve())); await harness.cleanup();
+  }
+}, 30000);

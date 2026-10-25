@@ -46,12 +46,11 @@ function setup(
   store.set(sidebarSectionSortsAtom, {});
   const newThread = vi.fn();
   const newProject = vi.fn();
-  const newSection = vi.fn();
   render(
     <Provider store={store}>
       <TooltipProvider>
         <SidebarHeaderActionsProvider
-          value={{ onNewProject: newProject, onNewSection: newSection }}
+          value={{ onNewProject: newProject }}
         >
           <SidebarHeaderControls
             label={label}
@@ -66,7 +65,7 @@ function setup(
       </TooltipProvider>
     </Provider>,
   );
-  return { store, newThread, newProject, newSection };
+  return { store, newThread, newProject };
 }
 
 async function openMenu(label = "Pinned") {
@@ -107,21 +106,20 @@ describe("sidebar header controls", () => {
   });
 
   it("preserves creation callbacks and separates section editing/removal", async () => {
-    const { newSection } = setup("Review", true);
+    const { newProject } = setup("Review", true);
     await openMenu("Review");
     expect(
       screen.getAllByRole("menuitem").map((item) => item.textContent),
     ).toEqual([
       "New project",
-      "New section",
       "Organize",
       "Sort by",
       "Rename",
       "Remove",
     ]);
     expect(screen.getAllByRole("separator")).toHaveLength(3);
-    fireEvent.click(screen.getByRole("menuitem", { name: "New section" }));
-    expect(newSection).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("menuitem", { name: "New project" }));
+    expect(newProject).toHaveBeenCalledOnce();
     await waitFor(() =>
       expect(
         screen.queryByRole("menuitem", { name: "New project" }),

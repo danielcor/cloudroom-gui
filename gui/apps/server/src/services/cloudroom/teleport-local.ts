@@ -319,6 +319,17 @@ export async function cloudFile(deps: AppDeps, threadId: string, path: string): 
   }
 }
 
+/** Which absolute paths exist in a thread's sandbox. A sleeping sandbox stays asleep and answers nothing. */
+export async function cloudFilesExist(deps: AppDeps, threadId: string, paths: string[]): Promise<Record<string, boolean>> {
+  const absolute = paths.filter((path) => isAbsolute(path));
+  const client = absolute.length ? await cloudroom(deps).threadClient(threadId, false).catch(() => null) : null;
+  if (!client) return {};
+  const output = (await vm(client, `printf '\\035'\nfor p in ${absolute.map(quote).join(" ")}; do [ -e "$p" ] && echo 1 || echo 0; done`)).toString();
+  const found = output.slice(output.indexOf("\x1d") + 1).trim().split("\n");
+  if (!output.includes("\x1d") || found.length !== absolute.length || found.some((line) => line !== "0" && line !== "1")) return {};
+  return Object.fromEntries(absolute.map((path, index) => [path, found[index] === "1"]));
+}
+
 async function localEnvironment(deps: AppDeps, thread: Thread) {
   const hostId = resolvePrimaryHostId(deps);
   if (!hostId) throw new ApiError(409, "host_unavailable", "This computer's local host is not ready.");

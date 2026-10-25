@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
-  CreateThreadSectionRequest,
   DeleteThreadSectionRequest,
   UpdateThreadSectionRequest,
 } from "@cloudroom/server-contract";
@@ -15,22 +14,6 @@ function invalidateThreadSectionQueries(
 ) {
   invalidateProjectListQueries({ queryClient });
   invalidateThreadListQueries({ queryClient });
-}
-
-export function useCreateThreadSection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    meta: {
-      errorMessage: "Failed to create section.",
-      showErrorToast: false,
-    },
-    mutationFn: (request: CreateThreadSectionRequest) =>
-      sdk.threadSections.create(request),
-    onSuccess: () => {
-      invalidateThreadSectionQueries(queryClient);
-    },
-  });
 }
 
 export function useUpdateThreadSection() {

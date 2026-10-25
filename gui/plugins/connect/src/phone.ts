@@ -37,8 +37,9 @@ export class PhoneRelay {
         this.error = null;
       })
       .catch((error: unknown) => {
-        this.error = error instanceof Error ? error.message : String(error);
-        this.bb.log.warn(`Cloudroom Connect registration failed: ${this.error}`);
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== this.error) this.bb.log.warn(`Cloudroom Connect registration failed: ${message}`);
+        this.error = message;
       })
       .finally(() => {
         this.checking = null;
@@ -53,11 +54,12 @@ export class PhoneRelay {
 
   private async reconcile(force: boolean): Promise<void> {
     await this.retirePending();
-    const { accountId } = await this.bb.sdk.cloudroom.connectAccount();
+    const { accountId, blocked } = await this.bb.sdk.cloudroom.connectAccount();
     this.signedIn = accountId !== null;
     if (accountId === null) {
       const signedOut = this.tunnel.getCredential();
       if (signedOut !== null) await this.retire(signedOut);
+      if (blocked) throw new Error(blocked);
       return;
     }
     const registeredFor = await this.bb.storage.kv.get<string>(ACCOUNT_KV_KEY);

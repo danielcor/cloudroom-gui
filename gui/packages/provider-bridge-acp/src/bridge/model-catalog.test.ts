@@ -27,6 +27,35 @@ describe("acp model catalog", () => {
     ]);
   });
 
+  it("names raw vendor/model ids like people would", () => {
+    const ids = [
+      "moonshotai/kimi-k3.1-pro",
+      "anthropic/claude-opus-5.5-fast",
+      "openai/gpt-6-sol",
+      "openai/o3-pro",
+      "deepseek/deepseek-v4-pro",
+    ];
+    const models = buildModelCatalogFromConfigOptions({
+      id: "model",
+      category: "model",
+      type: "select",
+      options: [
+        ...ids.map((value) => ({ value, name: value })),
+        { value: "opencode/big-pickle", name: "OpenCode Zen/Big Pickle" },
+      ],
+    });
+
+    expect(models.map((model) => model.displayName)).toEqual([
+      "Kimi K3.1 Pro",
+      "Claude Opus 5.5 Fast",
+      "GPT-6 Sol",
+      "o3 Pro",
+      "DeepSeek V4 Pro",
+      "OpenCode Zen/Big Pickle",
+    ]);
+    expect(models[0].model).toBe("moonshotai/kimi-k3.1-pro");
+  });
+
   it("parses bare model id lines", () => {
     expect(
       parseAgentModelLines(

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir, stat, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { and, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, max, notInArray } from "drizzle-orm";
 import { createThread, findLastCompletedRootStoredTurn, getAppSettings, getProject, getThread, getThreadExecutionOverride, setThreadExecutionOverride, updateThread, cloudroomThreads, cloudroomCommands, events, threads, type DbConnection, type DbQueryConnection, type DbTransaction } from "@cloudroom/db";
 import { PERSONAL_PROJECT_ID, encodeClientTurnRequestIdNumber, isStandaloneBuiltinCompactCommand, promptInputSchema, reasoningLevelSchema, threadQueuedMessageSchema, type Thread, type PromptInput, type ThreadEventType, type ThreadEventTurnStatus, type ThreadChangeKind, type ReasoningLevel } from "@cloudroom/domain";
 import type { CreateThreadRequest, ForkThreadRequest, SendMessageRequest, SendMessageResponse } from "@cloudroom/server-contract";
@@ -580,6 +580,23 @@ class CloudroomService {
     return work;
   }
 
+  /** Every hosted VM is retired (docs/scopes/sandboxes.md), but a Mac that signed in before keeps its dead address, which
+   *  stalls cloud previews and sync. Only hosted accounts with sandboxes have all three fields; self-hosted VMs have no account.
+   *  Returns the saved connection. */
+  private async dropRetiredVm() {
+    const retired = (saved: Awaited<ReturnType<typeof this.savedConnection>>) => Boolean(saved?.url && saved.account && saved.sandboxToken && (saved.websiteUrl ?? HOSTED_WEBSITE) === HOSTED_WEBSITE);
+    const saved = await this.savedConnection();
+    if (!retired(saved)) return saved;
+    await this.changeConnection(async () => {
+      const current = await this.savedConnection();
+      if (!current || !retired(current)) return;
+      const { url: _url, token: _token, gateToken: _gateToken, ...rest } = current;
+      await this.saveConnection(rest);
+      await stopSync(this.deps);
+    }).catch(() => {});
+    return this.savedConnection();
+  }
+
   private async saveConnection(value: unknown): Promise<void> {
     await mkdir(this.deps.config.dataDir, { recursive: true });
     const temporary = `${this.path}.${randomUUID()}`;
@@ -863,6 +880,7 @@ class CloudroomService {
   }
 
   async status() {
+    const lastCloudAt = this.deps.db.select({ at: max(threads.updatedAt) }).from(threads).where(eq(threads.executionTarget, "cloud")).get()?.at ?? null;
     let account: CloudroomAccount | null = null;
     let projectId: string | null = null;
     let storage: Storage | null = null;
@@ -888,7 +906,7 @@ class CloudroomService {
           model: capabilities?.harnesses.find((h) => h.id === "codex")?.model ?? null,
           steer: capabilities?.steer ?? false, rewind: capabilities?.rewind ?? false, attachments: capabilities?.attachments ?? false,
           compact: capabilities?.compact ?? false, queue_edit: capabilities?.queue_edit ?? false, queue_cancel: capabilities?.queue_cancel ?? false,
-          queue_reorder: capabilities?.queue_reorder ?? false, error: null, cloudQueue: this.sandboxes.cloudQueue(),
+          queue_reorder: capabilities?.queue_reorder ?? false, error: null, cloudQueue: this.sandboxes.cloudQueue(), usedCloud: lastCloudAt !== null, lastCloudAt,
           plan: this.sandboxes.currentPlan(), planUsage: this.sandboxes.planUsage(),
         };
       }
@@ -907,7 +925,7 @@ class CloudroomService {
         model: capabilities.harnesses.find((h) => h.id === "codex")?.model ?? null,
         steer: capabilities.steer, rewind: capabilities.rewind, attachments: capabilities.attachments,
         compact: capabilities.compact, queue_edit: capabilities.queue_edit, queue_cancel: capabilities.queue_cancel,
-        queue_reorder: capabilities.queue_reorder, error: null,
+        queue_reorder: capabilities.queue_reorder, error: null, usedCloud: lastCloudAt !== null, lastCloudAt,
       };
     } catch (error) { return { ready: false, account, selfHosted, projectId, storage, workspaces: false, repository: null, model: null, error: publicError(error) }; }
   }
@@ -2022,7 +2040,7 @@ class CloudroomService {
     }, 1500);
     this.timer.unref();
     const epoch = this.epoch;
-    void this.savedConnection().then(async (saved) => {
+    void this.dropRetiredVm().then(async (saved) => {
       if (!saved?.token || this.stopped || epoch !== this.epoch) return;
       const capabilities = capabilitiesSchema.parse(await (await this.client()).capabilities());
       if (this.stopped || epoch !== this.epoch) return;
@@ -2815,7 +2833,7 @@ class CloudroomService {
   private setConnectionIssue(threadId: string, phase: ConnectionPhase, error?: unknown): void {
     const issues = this.connectionIssues.get(threadId) ?? {};
     const previous = issues[phase];
-    const vmShutDown = error instanceof CloudroomConnectionError && error.message.includes("unexpected redirect") && !sandboxThread(binding(this.deps.db, threadId)?.coreUrl ?? "");
+    const vmShutDown = (error instanceof CloudroomConnectionError && error.message.includes("unexpected redirect") || error instanceof ApiError && error.body.code === "cloudroom_sandbox_only") && !sandboxThread(binding(this.deps.db, threadId)?.coreUrl ?? "");
     const issue = error === undefined ? undefined : vmShutDown ? { message: retiredVmMessage, reconnecting: false } : {
       message: phase === "replay" && !(error instanceof CloudroomError) ? `Cloudroom history could not be restored: ${error instanceof Error ? error.message : String(error)}` : publicError(error),
       reconnecting: phase !== "replay" && connectionFailure(error),

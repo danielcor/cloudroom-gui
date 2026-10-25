@@ -70,7 +70,7 @@ import {
   toThreadResponseFromThread,
 } from "../../services/threads/thread-runtime-display.js";
 import { archiveThreadAndChildren } from "../../services/threads/thread-archive.js";
-import { unarchiveThreadAsTopLevel } from "../../services/threads/thread-ownership.js";
+import { unarchiveThreadKeepingOpenParent } from "../../services/threads/thread-ownership.js";
 import { cloudroom, isCloudThread } from "../../services/cloudroom/commands.js";
 import { teleports } from "../../services/cloudroom/teleport.js";
 import { teleportToLocal } from "../../services/cloudroom/teleport-local.js";
@@ -559,7 +559,7 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
   post(routes.unarchive, (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     const providerThreadId = getLastProviderThreadId(deps, thread.id);
-    const unarchivedThread = unarchiveThreadAsTopLevel(
+    const unarchivedThread = unarchiveThreadKeepingOpenParent(
       deps,
       thread.id,
       query.keepParent === "true",

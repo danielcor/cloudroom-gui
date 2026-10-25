@@ -32,7 +32,6 @@ import {
 } from "@/hooks/queries/system-queries";
 import { useReorderPinnedThread } from "@/hooks/mutations/thread-state-mutations";
 import {
-  useCreateThreadSection,
   useDeleteThreadSection,
   useUpdateThreadSection,
 } from "@/hooks/mutations/thread-section-mutations";
@@ -63,7 +62,6 @@ import {
   AppCommandShortcutPill,
 } from "@/components/commands/AppCommandShortcutHint";
 import {
-  ThreadSectionCreateDialog,
   ThreadSectionRenameDialog,
   type ThreadSectionRenameDialogTarget,
 } from "@/components/dialogs/ThreadSectionCreateDialog";
@@ -1415,10 +1413,6 @@ function ProjectListComponent({
     mutate: reorderPinnedThreadMutate,
   } = useReorderPinnedThread();
   const {
-    isPending: isCreateThreadSectionPending,
-    mutate: createThreadSectionMutate,
-  } = useCreateThreadSection();
-  const {
     isPending: isUpdateThreadSectionPending,
     mutate: updateThreadSectionMutate,
   } = useUpdateThreadSection();
@@ -1469,45 +1463,11 @@ function ProjectListComponent({
     },
     [openRootCompose, setRootComposeProjectId],
   );
-  const [isSectionCreateDialogOpen, setIsSectionCreateDialogOpen] =
-    useState(false);
-  const [sectionCreateErrorMessage, setSectionCreateErrorMessage] = useState<
-    string | null
-  >(null);
   const [sectionRenameErrorMessage, setSectionRenameErrorMessage] = useState<
     string | null
   >(null);
   const sectionRenameDialog = useDialogState<ThreadSectionRenameDialogTarget>();
   const sectionDeleteDialog = useDialogState<SidebarSectionDefinition>();
-  const handleOpenCreateSectionDialog = useCallback(() => {
-    setSectionCreateErrorMessage(null);
-    setIsSectionCreateDialogOpen(true);
-  }, []);
-  const handleCreateSectionDialogOpenChange = useCallback((open: boolean) => {
-    if (!open) {
-      setSectionCreateErrorMessage(null);
-      setIsSectionCreateDialogOpen(false);
-    }
-  }, []);
-  const handleCreateThreadSection = useCallback(
-    (name: string) => {
-      setSectionCreateErrorMessage(null);
-      createThreadSectionMutate(
-        { name },
-        {
-          onSuccess: () => setIsSectionCreateDialogOpen(false),
-          onError: (error) =>
-            setSectionCreateErrorMessage(
-              getSectionMutationErrorMessage(
-                error,
-                "Failed to create section.",
-              ),
-            ),
-        },
-      );
-    },
-    [createThreadSectionMutate],
-  );
   const handleOpenRenameThreadSection = useCallback(
     (section: SidebarSectionDefinition) => {
       setSectionRenameErrorMessage(null);
@@ -1820,15 +1780,6 @@ function ProjectListComponent({
     actions: renderSectionDisplayOptions("threads", "Threads"),
     actionsOpen: isSectionDisplayOptionsOpen("threads"),
   } satisfies Omit<BuiltInSidebarSectionOptions, "content">;
-  const sectionCreateDialog = (
-    <ThreadSectionCreateDialog
-      errorMessage={sectionCreateErrorMessage}
-      open={isSectionCreateDialogOpen}
-      pending={isCreateThreadSectionPending}
-      onOpenChange={handleCreateSectionDialogOpenChange}
-      onCreate={handleCreateThreadSection}
-    />
-  );
   const sectionRenameDialogContent = (
     <ThreadSectionRenameDialog
       errorMessage={sectionRenameErrorMessage}
@@ -1868,9 +1819,7 @@ function ProjectListComponent({
     <SidebarHeaderActionsProvider
       value={{
         onNewProject,
-        onNewSection: handleOpenCreateSectionDialog,
         isCreatingProject,
-        isCreatingSection: isCreateThreadSectionPending,
       }}
     >
       <ProjectListShell>
@@ -1963,7 +1912,6 @@ function ProjectListComponent({
           )}
         />
       </ProjectListShell>
-      {sectionCreateDialog}
       {sectionRenameDialogContent}
       {sectionDeleteDialogContent}
     </SidebarHeaderActionsProvider>

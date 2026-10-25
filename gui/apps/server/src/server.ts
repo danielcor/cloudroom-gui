@@ -800,7 +800,7 @@ export function createApp(
   if (options?.staticDir) {
     registerStaticAppRoutes(app, options.staticDir);
   } else {
-    app.get("/", (context) => context.text("bb server"));
+    app.get("/", (context) => context.text("Cloudroom server. This dev copy has no built app; open it on its dev port."));
   }
 
   return {

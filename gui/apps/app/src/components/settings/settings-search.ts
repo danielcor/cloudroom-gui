@@ -72,6 +72,7 @@ const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   ]),
   ...entries("general", "Thread purpose", [
     ["Thread purpose", "goal summary percent done progress hover"],
+    ["Show in sidebar", "thread purpose hover preview card left"],
     ["Reasoning effort", "thread purpose thinking"],
   ]),
   ...entries("general", "Voice Input", [

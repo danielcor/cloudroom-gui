@@ -30,6 +30,7 @@ import { useInlineThreadTitle } from "@/components/thread/InlineThreadTitle";
 import {
   preventPurposeOpenOnFocus,
   SidebarThreadPurposeHoverCard,
+  threadPurposeShowInSidebarAtom,
 } from "@/components/thread/ThreadPurposeHoverCard";
 import {
   COARSE_POINTER_COMPACT_ROW_HEIGHT_CLASS,
@@ -553,6 +554,9 @@ function ThreadRowComponent({
   const prefetchOnHover = usePrefetchThreadOnHover(thread.id);
   const pluginThreadRowStatus = usePluginThreadRowStatus(thread.id);
   const harnessIconMode = useAtomValue(harnessIconModeAtom);
+  const sidebarPurpose = useAtomValue(threadPurposeShowInSidebarAtom)
+    ? (thread.purpose ?? null)
+    : null;
   const showActive = isActive;
   const hasPendingInteraction = thread.hasPendingInteraction;
   const threadRuntimeBusy = isRuntimeBusyThread(thread);
@@ -794,7 +798,7 @@ function ThreadRowComponent({
         ) : (
           <span
             className="bb-thread-title"
-            title={thread.purpose ? undefined : labelTitle}
+            title={sidebarPurpose ? undefined : labelTitle}
             onDoubleClick={startTitleEditing}
           >
             <ThreadTitleMentions title={threadTitle} />
@@ -938,7 +942,7 @@ function ThreadRowComponent({
 
   return (
     <SidebarThreadPurposeHoverCard
-      purpose={isEditing ? null : (thread.purpose ?? null)}
+      purpose={isEditing ? null : sidebarPurpose}
       threadId={thread.id}
     >
       <ThreadActionsContextMenu

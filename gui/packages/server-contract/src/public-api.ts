@@ -1580,6 +1580,14 @@ export const publicApiRoutes = {
       ),
       response: binaryResponse<Uint8Array>(),
     }),
+    hostFilesExist: defineRoute({
+      path: "/threads/:id/host-files/exist",
+      method: "post",
+      request: jsonRequest<PathId, HostPathsExistRequest>(
+        hostPathsExistRequestSchema,
+      ),
+      response: jsonResponse<HostPathsExistResponse>(),
+    }),
     worktreeFile: defineRoute({
       path: "/threads/:id/worktree/files/:filePath{.+}",
       method: "get",

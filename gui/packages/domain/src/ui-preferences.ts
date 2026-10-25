@@ -74,6 +74,7 @@ export const UI_PREFERENCE_KEYS = [
   "threadNaming.rules",
   "threadNaming.renameSensitivity",
   "threadPurpose.enabled",
+  "threadPurpose.showInSidebar",
   "threadPurpose.model",
   "threadPurpose.reasoningEffort",
   "appearance.theme",
@@ -226,7 +227,12 @@ export const uiPreferenceDefinitions = {
   "threadPurpose.enabled": defineUiPreference(
     z.boolean(),
     true,
-    "Keep a short purpose and percent done on each thread, refreshed after every reply. Shown when hovering the thread title, or a sidebar thread for 1.5s.",
+    "Keep a short purpose and percent done on each thread, refreshed after every reply. Shown when hovering the thread title, or a sidebar thread for 1.5s (see threadPurpose.showInSidebar).",
+  ),
+  "threadPurpose.showInSidebar": defineUiPreference(
+    z.boolean(),
+    true,
+    "Show the purpose card after hovering a sidebar thread for 1.5s. Off hides only the sidebar card; the thread title card stays.",
   ),
   "threadPurpose.model": defineUiPreference(
     uiPreferenceStringSchema.nullable(),

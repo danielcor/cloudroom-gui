@@ -8,6 +8,11 @@ import {
 import type { ThreadPurpose } from "@cloudroom/domain";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { createSyncedPreferenceAtom } from "@/lib/ui-preferences/synced-preference-atom";
+
+export const threadPurposeShowInSidebarAtom = createSyncedPreferenceAtom(
+  "threadPurpose.showInSidebar",
+);
 
 function ThreadPurposeCardBody({ purpose }: { purpose: ThreadPurpose }) {
   return (

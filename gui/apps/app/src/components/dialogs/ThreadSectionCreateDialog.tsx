@@ -10,14 +10,6 @@ import { Input } from "@cloudroom/shared-ui/input";
 import { RenameDialog } from "./RenameDialog";
 import { useNameValidation } from "./useNameValidation.js";
 
-interface ThreadSectionCreateDialogProps {
-  errorMessage?: string | null;
-  open: boolean;
-  pending?: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreate: (name: string) => void;
-}
-
 export interface ThreadSectionRenameDialogTarget {
   id: string;
   name: string;
@@ -40,33 +32,6 @@ interface ThreadSectionDialogContentProps {
   title: string;
   onSubmit: (name: string) => void;
   inputRef: RefObject<HTMLInputElement | null>;
-}
-
-export function ThreadSectionCreateDialog({
-  errorMessage,
-  open,
-  pending = false,
-  onOpenChange,
-  onCreate,
-}: ThreadSectionCreateDialogProps) {
-  return (
-    <RenameDialog open={open} onOpenChange={onOpenChange}>
-      {(inputRef) =>
-        open ? (
-          <ThreadSectionDialogContent
-            description="Create a section for threads."
-            errorMessage={errorMessage}
-            initialName=""
-            pending={pending}
-            submitLabel="Create section"
-            title="New section"
-            onSubmit={onCreate}
-            inputRef={inputRef}
-          />
-        ) : null
-      }
-    </RenameDialog>
-  );
 }
 
 export function ThreadSectionRenameDialog({

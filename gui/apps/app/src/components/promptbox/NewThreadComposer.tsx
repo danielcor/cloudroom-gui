@@ -2,6 +2,7 @@ import { ClaudeConnectionButton } from "@/components/ClaudeConnection";
 import {
   useCloudroomConnection,
   cloudHarness,
+  cloudCanRunHarness,
   cloudCatalogKnown,
   cloudHarnessNames,
   cloudReasoningLevels,
@@ -14,6 +15,7 @@ import { fetchWithAppSurface } from "@/lib/app-surface";
 import { useIsCompactViewport } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
 import { ProviderRequirementBanner } from "./banner/ProviderRequirementBanner";
 import { CloudQueueCard, FreePlanTip } from "@/components/CloudQueue";
+import { TryCloudHint } from "@/components/promptbox/TryCloudHint";
 import { CloudBranchPicker } from "./CloudBranchPicker";
 import { Button } from "@cloudroom/shared-ui/button";
 import {
@@ -966,6 +968,13 @@ export function NewThreadComposer({
             provider.availability?.status !== "unavailable",
         ) ?? false
     );
+  const selectCloudTarget = useCallback(() => {
+    if (cloudLocked) return showCloudSignIn();
+    snapshotDraftBeforeOptionChange();
+    setExecutionTarget("cloud");
+    setCloudPicked(true);
+    localStorage.setItem("cloudroom.executionTarget", "cloud");
+  }, [cloudLocked, snapshotDraftBeforeOptionChange]);
   const handleSelectProvider = useCallback(
     (provider: SystemEnvironmentProvider, hostId: string | null) => {
       setExecutionTarget("local");
@@ -1792,14 +1801,11 @@ export function NewThreadComposer({
                 selected: executionTarget === "cloud",
                 unavailableReason: null,
                 ...(cloudLocked ? { note: CLOUD_LOCKED_REASON } : {}),
-                onSelect: () => {
-                  if (cloudLocked) return showCloudSignIn();
-                  snapshotDraftBeforeOptionChange();
-                  setExecutionTarget("cloud");
-                  setCloudPicked(true);
-                  localStorage.setItem("cloudroom.executionTarget", "cloud");
-                },
+                onSelect: selectCloudTarget,
               },
+              ...(executionTarget === "local" && !cloudLocked && !locks.environment && cloudCanRunHarness(selectedProviderId)
+                ? { hint: <TryCloudHint draftLength={promptDraft.text.trim().length} onUseCloud={selectCloudTarget} /> }
+                : {}),
               value: effectiveEnvironmentValue,
               sources: projectSources,
               disabled: locks.environment,

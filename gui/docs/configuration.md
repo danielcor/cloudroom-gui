@@ -110,7 +110,8 @@ over shell variables. The environment remains the internal and deployment
 substrate, and source-development commands still load `.env` files.
 
 `CLOUDROOM_CONNECT_URL` points the server at another Cloudroom Connect relay
-than `https://cloudroom.run`, for development.
+than `https://cloudroom.run`, for development. Dev copies (`pnpm dev`) connect
+only when it is set, because they serve no app for phones to open.
 
 After `bb-app config` writes `~/.bb/config.json` or `bb-app env` writes
 `~/.bb/env.json`, it asks the running local server to reload. If bb is not
@@ -789,6 +790,7 @@ Hovering a thread's title shows its purpose: one short line on its goal and curr
 It is written from the first message alongside the name, then rewritten after every reply. It never changes the title.
 Settings → Thread purpose turns it off (`threadPurpose.enabled`, on by default), picks the model
 (`threadPurpose.model`), and sets reasoning effort (`threadPurpose.reasoningEffort`, default medium).
+Its Show in sidebar switch (`threadPurpose.showInSidebar`, on by default) hides only the card on sidebar threads.
 The default model is Haiku 5.5 on Claude Code, falling back to GPT-6 Luna on Codex. Codex-only users get GPT-6 Luna.
 With neither signed in on this Mac, no purposes are written.
 `room-cli thread show` prints it.

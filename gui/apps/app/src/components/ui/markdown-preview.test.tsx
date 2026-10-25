@@ -119,7 +119,7 @@ describe("MarkdownPreview", () => {
     expect(code.querySelectorAll("span.sh__line")).toHaveLength(2);
   });
 
-  it("renders inline-code Markdown file paths as local file links", () => {
+  it("links inline-code Markdown paths with a folder, not bare names", () => {
     render(
       <MarkdownPreview
         content="Read `README.md`, `docs/guide.markdown:4`, and `src/app.ts`."
@@ -127,9 +127,7 @@ describe("MarkdownPreview", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("link", { name: "README.md" }).getAttribute("href"),
-    ).toBe("file:///workspace/README.md");
+    expect(screen.getByText("README.md").tagName).toBe("CODE");
     expect(
       screen
         .getByRole("link", { name: "docs/guide.markdown:4" })

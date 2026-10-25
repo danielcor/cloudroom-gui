@@ -27,9 +27,7 @@ import { SIDEBAR_CONTROL_BUTTON_CLASS } from "./sidebarRowClasses";
 
 interface HeaderCreationActions {
   onNewProject?: () => void;
-  onNewSection?: () => void;
   isCreatingProject?: boolean;
-  isCreatingSection?: boolean;
 }
 
 const HeaderCreationContext = createContext<HeaderCreationActions>({});
@@ -231,13 +229,6 @@ export function SidebarHeaderControls({
               >
                 <Icon name="FolderPlus" />
                 New project
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={!creation.onNewSection || creation.isCreatingSection}
-                onSelect={creation.onNewSection}
-              >
-                <Icon name="SectionAdd" />
-                New section
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {(

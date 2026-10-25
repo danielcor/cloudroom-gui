@@ -50,6 +50,12 @@ py="$venv/lib/python3.12/site-packages/browser_harness/daemon.py"
 if [ "$(uname -s)" = Linux ] && ! grep -qs '".config/BraveSoftware/Brave-Browser"' "$py"; then
   sed -i 's|".config/google-chrome",|".config/google-chrome", ".config/BraveSoftware/Brave-Browser", ".config/BraveSoftware/Brave-Origin",|' "$py" 2>/dev/null || true
 fi
+# 0.1.13 reads each request with asyncio's 64 KiB line limit, so bigger ones failed with a broken pipe
+# (upstream PR 377). Raise it to 64 MiB. Skips itself once a release changes the line.
+ipc="$venv/lib/python3.12/site-packages/browser_harness/_ipc.py"
+if grep -qs 'start_unix_server(handler, path=path)' "$ipc"; then
+  sed -i.bak 's|start_unix_server(handler, path=path)|start_unix_server(handler, path=path, limit=1 << 26)|' "$ipc" 2>/dev/null && rm -f "$ipc.bak" || true
+fi
 
 # Use the user's default browser: when it is Chromium-based and closed, open it in the background so
 # browser-harness attaches to it. Safari and Firefox have no DevTools protocol.

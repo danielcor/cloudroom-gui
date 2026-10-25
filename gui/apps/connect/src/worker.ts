@@ -646,13 +646,26 @@ async function phoneApp(request: Request, url: URL, env: Env, ctx: ExecutionCont
   return scoped;
 }
 
+function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+  const host = url.hostname.toLowerCase();
+  if (host === env.BASE_DOMAIN) return apex(request, url, env);
+  if (host === `${APP_HANDLE}.${env.BASE_DOMAIN}`) return phoneApp(request, url, env, ctx);
+  const parsed = parseVisitorHost(host, env.BASE_DOMAIN);
+  return parsed ? visitor(request, url, env, ctx, parsed) : Promise.resolve(text("Not found\n", 404));
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const host = url.hostname.toLowerCase();
-    if (host === env.BASE_DOMAIN) return apex(request, url, env);
-    if (host === `${APP_HANDLE}.${env.BASE_DOMAIN}`) return phoneApp(request, url, env, ctx);
-    const parsed = parseVisitorHost(host, env.BASE_DOMAIN);
-    return parsed ? visitor(request, url, env, ctx, parsed) : text("Not found\n", 404);
+    try {
+      return await route(request, env, ctx);
+    } catch (error) {
+      if (!String((error as Error)?.message).startsWith("D1_ERROR")) throw error;
+      console.log({ event: "db_unavailable", message: (error as Error).message });
+      return new Response("Cloudroom is busy. Try again in a few seconds.\n", {
+        status: 503,
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "retry-after": "5" },
+      });
+    }
   },
 } satisfies ExportedHandler<Env>;
