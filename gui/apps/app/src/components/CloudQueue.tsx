@@ -81,7 +81,7 @@ export function PlanCard() {
         );
       })}
       <Button type="button" size="sm" className="mt-3 w-full justify-start" onClick={() => openUpgrade("plan_card")}>
-        <span className="min-w-0 truncate">Get 10× more with Pro</span><span className="ml-auto shrink-0 font-normal opacity-70">$50/mo</span><Icon name="ArrowRight" aria-hidden />
+        <span className="min-w-0 truncate">Unlimited agents with Pro</span><span className="ml-auto shrink-0 font-normal opacity-70">$50/mo</span><Icon name="ArrowRight" aria-hidden />
       </Button>
     </section>
   );
@@ -109,8 +109,7 @@ function PlanMeter({ plan, rows }: { plan: string; rows: { label: string; used: 
 }
 
 const PRO_REASONS = [
-  "Pro gives you 1,000 cloud agents a month. Free gives you 100.",
-  "Pro has no daily limit. Free stops at 50 new cloud agents a day.",
+  "Pro gives you unlimited cloud agents. Free gives you 50 a month.",
   "Pro gives you 300 agent hours every month.",
   "Pro keeps cloud agents awake 4× longer, so they reply faster.",
   "Pro cloud agents never get paused when the cloud gets busy.",

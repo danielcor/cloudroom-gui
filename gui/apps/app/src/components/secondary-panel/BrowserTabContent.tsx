@@ -35,7 +35,10 @@ import {
 } from "@/lib/browser-url";
 import { useBrowserHistory } from "@/lib/browser-history";
 import { BROWSER_VIEW_BOUNDS_SYNC_EVENT } from "@/lib/browser-view-bounds-sync";
-import { useIsBrowserDimmingModalOpen } from "@/hooks/useBrowserDimmingModal";
+import {
+  useIsBrowserDimmingModalOpen,
+  useNativeBrowserViewShown,
+} from "@/hooks/useBrowserDimmingModal";
 import { usePointerCoarse } from "@cloudroom/shared-ui/hooks/use-pointer-coarse";
 import { useIsCompactViewport } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
 import {
@@ -654,6 +657,7 @@ export function BrowserTabContent({
     !hasPageLoadError &&
     isBrowserViewAttached &&
     !isBrowserDimmingModalOpen;
+  useNativeBrowserViewShown(isViewVisible);
   useLayoutEffect(() => {
     if (visibilityCoordinator === null) {
       return;

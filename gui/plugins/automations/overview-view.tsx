@@ -27,7 +27,6 @@ import {
   ResourceCollectionPage,
   ResourceCollectionViewport,
   ResourceListState,
-  ResourceFilterMenu,
   ResourceMeta,
   ResourceRow,
   ResourceSortMenu,
@@ -43,7 +42,6 @@ import {
   DropdownMenuTrigger,
 } from "@cloudroom/shared-ui/dropdown-menu";
 import {
-  type AutomationStatusFilter,
   formatAutomationTrigger,
   isCloudWebhook,
   formatOverviewScheduleMetadata,
@@ -59,9 +57,10 @@ import { AutomationMetadataItem } from "./metadata.js";
 import {
   LoopTemplatesView,
   type LoopTemplatesState,
-  type TemplateProject,
   LOOP_PRIORITY_STYLE,
   LoopGroupDivider,
+  LoopSideMenu,
+  type LoopMenuItem,
 } from "./templates-view.js";
 import {
   LoopLimitSwitch,
@@ -71,18 +70,12 @@ import {
 import { CloudLoopDialog } from "./loop-dialog.js";
 import {
   LoopReviewView,
+  OFFSCREEN_ROW_CLASSES,
   reviewableItems,
   ReviewToolbar,
   type ReviewFilter,
   type ReviewLayout,
 } from "./review-view.js";
-
-const OVERVIEW_BAND_CLASSES = "mx-auto w-full max-w-3xl";
-
-const AUTOMATION_STATUS_FILTER_OPTIONS = [
-  { id: "active", label: "Active" },
-  { id: "paused", label: "Paused" },
-] as const;
 
 export const CREATE_AUTOMATION_PROMPT = "Create a new Cloudroom loop to ";
 // The New button's menu (ADR 0262, design 1): pick the trigger, then finish the sentence in chat.
@@ -116,7 +109,6 @@ const NEW_LOOP_OPTIONS = [
 ] as const;
 
 type OverviewEntry = AutomationsOverviewResponse["automations"][number];
-type AutomationProjectFilter = `project:${string}`;
 type AutomationSortMode = "next" | "project" | "alpha";
 type ProviderList = PluginProvidersState["providers"];
 type AutomationSortDirection = "asc" | "desc";
@@ -148,14 +140,14 @@ function routeOf(
   return { projectId: automation.projectId, automationId: automation.id };
 }
 
-const LAST_RUN_DOT = {
-  succeeded: { label: "Last run succeeded", className: "bg-success" },
-  skipped: { label: "Last run skipped", className: "bg-muted-foreground/50" },
-  failed: { label: "Last run failed", className: "bg-destructive" },
-  running: { label: "Running", className: "animate-pulse bg-primary" },
-} as const;
-
 const LOOP_PRIORITIES = [1, 2, 3, 4] as const;
+
+function cloudLoopKey(projectId: string | null | undefined, name: string) {
+  return `cloud:${projectId ?? ""}:${name}`;
+}
+
+const cloudKey = (automation: CloudAutomation) =>
+  cloudLoopKey(automation.project_id, automation.name);
 type LoopPriority = (typeof LOOP_PRIORITIES)[number];
 const DEFAULT_LOOP_PRIORITY: LoopPriority = 3;
 /** Priorities just picked, shown until the saved loops catch up; a failed save drops its pick. */
@@ -165,9 +157,7 @@ function useChosenPriorities(local: unknown, cloud: unknown) {
   const choose = useCallback(
     (key: string, priority: LoopPriority, save: () => Promise<void>) => {
       setChosen((current) => ({ ...current, [key]: priority }));
-      save().catch(() =>
-        setChosen(({ [key]: _dropped, ...rest }) => rest),
-      );
+      save().catch(() => setChosen(({ [key]: _dropped, ...rest }) => rest));
     },
     [],
   );
@@ -228,25 +218,6 @@ function LoopPriorityMenu({
   );
 }
 
-function AutomationStatusDot({
-  status,
-}: {
-  status: AutomationResponse["lastRunStatus"];
-}) {
-  return (
-    <span
-      role="img"
-      aria-label={status === null ? "Not run yet" : LAST_RUN_DOT[status].label}
-      className={cn(
-        "size-[7px] shrink-0 rounded-full",
-        status === null
-          ? "ring-1 ring-inset ring-muted-foreground/50"
-          : LAST_RUN_DOT[status].className,
-      )}
-    />
-  );
-}
-
 function formatModelName(model: string): string {
   const [, base = model, context] = /^(.+?)(?:\[(\w+)\])?$/u.exec(model) ?? [];
   const name = (base.split("/").at(-1) ?? base)
@@ -280,11 +251,13 @@ function AutomationAgentLine({
   agents,
   providers,
   compact = false,
+  quiet = false,
 }: {
   agents: readonly AutomationAgentSummary[];
   providers: ProviderList;
   /** Logo instead of the harness name, for narrow cards. */
   compact?: boolean;
+  quiet?: boolean;
 }) {
   if (agents.length === 0) {
     return (
@@ -320,6 +293,7 @@ function AutomationAgentLine({
     providers
       .flatMap((info) => info.reasoningLevels ?? [])
       .find((option) => option.id === level)?.label ?? level;
+  const level = levels.map(levelLabel).join(" ⇄ ");
   const parts = [
     compact
       ? ""
@@ -329,7 +303,7 @@ function AutomationAgentLine({
           )
           .join(" ⇄ "),
     models.join(" ⇄ "),
-    levels.map(levelLabel).join(" ⇄ "),
+    level,
   ].filter((part) => part !== "");
   return (
     <span className="flex min-w-0 items-center gap-1.5">
@@ -359,7 +333,10 @@ function AutomationAgentLine({
           <span
             className={cn(
               "min-w-0 truncate",
-              part === levelLabel("max") && "text-primary",
+              part === level &&
+                (quiet
+                  ? "text-muted-foreground"
+                  : part === levelLabel("max") && "text-primary"),
             )}
           >
             {part}
@@ -402,25 +379,6 @@ export function automationProjectLabel(
   project: OverviewEntry["project"],
 ): string {
   return project.name;
-}
-
-function automationProjectFilterId(
-  entry: OverviewEntry,
-): AutomationProjectFilter {
-  const projectId = entry.project.id;
-  return `project:${projectId}`;
-}
-
-function isAutomationProjectFilter(
-  value: string,
-): value is AutomationProjectFilter {
-  return value.startsWith("project:");
-}
-
-function isAutomationStatusFilter(
-  value: string,
-): value is AutomationStatusFilter {
-  return AUTOMATION_STATUS_FILTER_OPTIONS.some((option) => option.id === value);
 }
 
 function applyAutomationSortDirection(
@@ -642,7 +600,7 @@ function LoopOrbit({
   return (
     <section
       aria-label="Loops at a glance"
-      className="relative flex items-center gap-10 overflow-hidden rounded-2xl border border-foreground/10 bg-linear-to-b from-foreground/[0.035] to-foreground/[0.012] px-8 pt-7 pb-11 max-md:flex-col max-md:items-stretch"
+      className="relative flex items-center gap-10 overflow-hidden rounded-2xl border border-foreground/10 bg-linear-to-b from-foreground/[0.035] to-foreground/[0.012] px-8 pt-7 pb-11 @max-2xl:flex-col @max-2xl:items-stretch"
     >
       <div className="relative mx-auto size-[236px] shrink-0">
         <svg
@@ -806,155 +764,218 @@ function LoopLocation({ cloud }: { cloud: boolean }) {
   );
 }
 
-function LoopRepo({
-  project,
+type RunTick = Exclude<OrbitTick, null>;
+
+const CARD_RUNS = 10;
+const RUN_DOT = {
+  done: "bg-foreground/70",
+  "needs-you": "bg-warning-text/80",
+  failed: "bg-destructive-text/80",
+} as const;
+
+function LoopRunDots({ runs }: { runs: readonly RunTick[] }) {
+  const last = runs.slice(-CARD_RUNS);
+  const done = runs.filter((run) => run === "done").length;
+  return (
+    <>
+      <span
+        role="img"
+        aria-label={`Last ${last.length} runs`}
+        className="flex shrink-0 items-center gap-1"
+      >
+        {[...Array<null>(CARD_RUNS - last.length).fill(null), ...last].map(
+          (run, index) => (
+            <span
+              key={index}
+              className={cn(
+                "size-1.5 rounded-full",
+                run === null ? "bg-foreground/10" : RUN_DOT[run],
+              )}
+            />
+          ),
+        )}
+      </span>
+      {runs.length >= 3 ? (
+        <span className="tabular-nums">
+          {Math.round((100 * done) / runs.length)}%
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function LoopRepoTag({
+  projectId,
+  label,
   github,
 }: {
-  project: OverviewEntry["project"];
+  projectId: string | null | undefined;
+  label: string;
   github: string | null;
 }) {
-  const label = automationProjectLabel(project);
-  const [owner, repo] = github?.split("/") ?? [];
   return (
-    <span className="mt-1.5 flex min-w-0">
-      <span className="inline-flex min-w-0 max-w-full items-center rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
-        <AutomationMetadataItem
-          icon={github ? "GithubLogo" : "Folder"}
-          iconLabel={
-            github
-              ? "GitHub repo"
-              : project.id === PERSONAL_PROJECT_ID
-                ? `Project: ${label}`
-                : "Project"
-          }
-          title={github ?? label}
-        >
-          {github ? (
-            <>
-              {owner}/<span className="text-foreground/90">{repo}</span>
-            </>
-          ) : (
-            <span className="text-foreground/90">{label}</span>
-          )}
-        </AutomationMetadataItem>
+    <>
+      <span aria-hidden className="text-muted-foreground/40">
+        ·
       </span>
+      <AutomationMetadataItem
+        icon={github ? "GithubLogo" : "Laptop"}
+        iconLabel={
+          github
+            ? "GitHub repo"
+            : projectId === PERSONAL_PROJECT_ID
+              ? `Project: ${label}`
+              : "Local project"
+        }
+        title={github ?? label}
+      >
+        {label}
+      </AutomationMetadataItem>
+    </>
+  );
+}
+
+function LoopBadges({
+  status,
+  lastError,
+  needsYou,
+}: {
+  status: AutomationResponse["lastRunStatus"];
+  lastError: string | null;
+  needsYou: number;
+}) {
+  const failed = status === "failed" || (status === "skipped" && !!lastError);
+  if (!failed && needsYou === 0) return null;
+  return (
+    <span className="relative flex shrink-0 items-center gap-1.5">
+      {failed ? (
+        <FailedBadge error={lastError} waiting={status === "skipped"} />
+      ) : null}
+      <NeedsYouBadge count={needsYou} />
     </span>
   );
 }
 
-function AutomationListRow({
-  cloud,
-  leading,
-  status,
-  lastError = null,
+function LoopCard({
   name,
-  agentLine,
+  cloud,
+  agent,
+  badges,
+  report,
   schedule,
   nextRun,
   nextRunAt,
-  enabled,
   muted,
-  needsYou,
-  toggle,
-  actions,
-  openLabel,
-  onOpen,
   repo,
+  runs,
+  actions,
+  toggle,
+  onOpen,
 }: {
-  cloud: boolean;
-  leading?: ReactNode;
-  status: AutomationResponse["lastRunStatus"];
-  lastError?: string | null;
   name: string;
-  agentLine: ReactNode;
+  cloud: boolean;
+  agent: ReactNode;
+  badges: ReactNode;
+  report: string | null;
   schedule: string;
   nextRun: string;
   nextRunAt: number | null;
-  enabled: boolean;
   muted: boolean;
-  needsYou: number;
-  toggle: ReactNode;
-  actions?: ReactNode;
-  openLabel?: string;
-  onOpen: () => void;
   repo?: ReactNode;
+  runs: readonly RunTick[];
+  actions?: ReactNode;
+  toggle: ReactNode;
+  onOpen: () => void;
 }) {
   return (
-    <ResourceRow
-      leading={leading ?? <AutomationStatusDot status={status} />}
-      title={name}
-      state={
-        <>
-          {status === "failed" || (status === "skipped" && lastError) ? (
-            <FailedBadge error={lastError} waiting={status === "skipped"} />
+    <div
+      data-loop-card=""
+      className={cn(
+        "group/card relative flex min-w-0 flex-col rounded-xl border border-foreground/10 bg-surface-raised px-[18px] pt-[18px] pb-4 transition-colors hover:border-foreground/20 [contain-intrinsic-size:auto_220px] [content-visibility:auto]",
+        muted && "opacity-60",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="min-w-0 flex-1 cursor-pointer text-left text-lg font-semibold leading-snug tracking-[-0.015em] text-foreground after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none focus-visible:after:ring-1 focus-visible:after:ring-ring"
+        >
+          <span className="line-clamp-2">{name}</span>
+        </button>
+        <div className="relative flex shrink-0 items-center gap-0.5">
+          {actions ? (
+            <span className="flex items-center opacity-0 transition-opacity group-focus-within/card:opacity-100 group-hover/card:opacity-100">
+              {actions}
+            </span>
           ) : null}
-          <NeedsYouBadge count={needsYou} />
-        </>
-      }
-      description={
-        <>
-          {repo}
-          <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-muted-foreground/80">
-            <LoopLocation cloud={cloud} />
-            {agentLine}
-          </span>
-          <span className="mt-1 flex min-w-0 items-center gap-1.5">
-            <span className="min-w-0 truncate" title={schedule}>
-              {schedule}
-            </span>
-            <span aria-hidden className="text-muted-foreground/40">
-              ·
-            </span>
-            <span
-              className={cn(
-                "shrink-0 whitespace-nowrap tabular-nums",
-                nextRun === "Running"
-                  ? "font-medium text-primary-text"
-                  : enabled && nextRun.startsWith("in ")
-                    ? "font-mono text-foreground"
-                    : undefined,
-              )}
-              title={
-                nextRunAt === null
-                  ? undefined
-                  : formatScheduleRunTime(nextRunAt)
-              }
-            >
-              {nextRun}
-            </span>
-          </span>
-        </>
-      }
-      className="rounded-lg border border-border bg-surface-raised px-4 transition-colors hover:border-foreground/20"
-      muted={muted}
-      openLabel={openLabel}
-      onOpen={onOpen}
-      actions={actions}
-      persistentActions={toggle}
-    />
+          {toggle}
+        </div>
+      </div>
+      <div className="mt-2.5 flex min-w-0 items-center gap-2">
+        <span className="inline-flex min-w-0 items-center rounded-full border border-foreground/10 bg-foreground/[0.06] py-1 pr-2.5 pl-2 text-[12.5px] font-medium text-foreground/85">
+          {agent}
+        </span>
+        {badges}
+      </div>
+      <p
+        className={cn(
+          "mt-3 line-clamp-2 text-[13.5px] leading-normal",
+          report === null
+            ? "italic text-subtle-foreground"
+            : "text-muted-foreground",
+        )}
+      >
+        {report ?? "No reviewed runs yet."}
+      </p>
+      <div className="flex-1" />
+      <div className="mt-3 flex min-w-0 items-center gap-1.5 text-xs text-subtle-foreground">
+        <LoopLocation cloud={cloud} />
+        <span className="min-w-0 truncate">{schedule}</span>
+        {repo}
+      </div>
+      <div className="mt-3 flex items-center gap-2 border-t border-foreground/[0.06] pt-3 text-xs text-subtle-foreground">
+        <LoopRunDots runs={runs} />
+        <span
+          className={cn(
+            "relative ml-auto whitespace-nowrap font-mono tabular-nums",
+            nextRun === "Running"
+              ? "font-sans font-medium text-primary-text"
+              : "text-muted-foreground",
+          )}
+          title={
+            nextRunAt === null ? undefined : formatScheduleRunTime(nextRunAt)
+          }
+        >
+          {nextRun}
+        </span>
+      </div>
+    </div>
   );
 }
 
 export function OverviewRow({
   automation,
-  project,
   scriptAgents,
   providers,
-  github = null,
   now,
   needsYou = 0,
   leading,
+  repo,
+  runs = [],
+  report = null,
   onNavigate,
   onEnabledChange,
 }: {
   automation: AutomationResponse;
-  project: OverviewEntry["project"];
   scriptAgents: readonly AutomationAgentSummary[] | undefined;
   providers: ProviderList;
-  github?: string | null;
   now: number;
   needsYou?: number;
   leading?: ReactNode;
+  repo?: ReactNode;
+  runs?: readonly RunTick[];
+  report?: string | null;
   onNavigate: (route: AutomationDetailRoute) => void;
   onEnabledChange: (
     enabled: boolean,
@@ -972,25 +993,32 @@ export function OverviewRow({
   const lifecycleLocked = !oneShotLifecycleAllowsToggle(oneShotLifecycle);
 
   return (
-    <AutomationListRow
-      cloud={false}
-      leading={leading}
-      status={automation.lastRunStatus}
-      lastError={automation.lastError}
+    <LoopCard
       name={automation.name}
-      repo={<LoopRepo project={project} github={github} />}
-      agentLine={
+      cloud={false}
+      agent={
         <AutomationAgentLine
           agents={automationAgents(automation, scriptAgents)}
           providers={providers}
+          compact
+          quiet
         />
       }
-      needsYou={needsYou}
+      badges={
+        <LoopBadges
+          status={automation.lastRunStatus}
+          lastError={automation.lastError}
+          needsYou={needsYou}
+        />
+      }
+      report={report}
       schedule={formatAutomationTrigger(automation.trigger)}
       nextRun={automationNextRunText(automation, now)}
       nextRunAt={automation.nextRunAt}
-      enabled={automation.enabled}
-      muted={lifecycleLocked}
+      muted={lifecycleLocked || !automation.enabled}
+      repo={repo}
+      runs={runs}
+      actions={leading}
       onOpen={() => onNavigate(route)}
       toggle={
         <AutomationLifecycleControl
@@ -1018,44 +1046,32 @@ export function OverviewRow({
 
 export function CloudAutomationRow({
   automation,
-  project,
   providers,
   now,
   needsYou = 0,
   leading,
+  repo,
+  runs = [],
+  report = null,
   actions,
 }: {
   automation: CloudAutomation;
-  project?: TemplateProject;
   providers: ProviderList;
   now: number;
   needsYou?: number;
   leading?: ReactNode;
+  repo?: ReactNode;
+  runs?: readonly RunTick[];
+  report?: string | null;
   actions: CloudAutomationActions;
 }) {
   const nextRunAt =
     automation.next_run_at === null ? null : Date.parse(automation.next_run_at);
   return (
-    <AutomationListRow
-      cloud
-      leading={leading}
-      repo={
-        project ? (
-          <LoopRepo project={project} github={project.github} />
-        ) : undefined
-      }
-      status={
-        automation.last_error?.startsWith("Skipped: ")
-          ? "skipped"
-          : automation.last_error !== null
-            ? "failed"
-            : automation.last_run_at !== null
-              ? "succeeded"
-              : null
-      }
-      lastError={automation.last_error}
+    <LoopCard
       name={automation.name}
-      agentLine={
+      cloud
+      agent={
         <AutomationAgentLine
           agents={[
             automation.agent ?? {
@@ -1065,9 +1081,24 @@ export function CloudAutomationRow({
             },
           ]}
           providers={providers}
+          compact
+          quiet
         />
       }
-      needsYou={needsYou}
+      badges={
+        <LoopBadges
+          status={
+            automation.last_error?.startsWith("Skipped: ")
+              ? "skipped"
+              : automation.last_error !== null
+                ? "failed"
+                : null
+          }
+          lastError={automation.last_error}
+          needsYou={needsYou}
+        />
+      }
+      report={report}
       schedule={
         isCloudWebhook(automation)
           ? "On webhook"
@@ -1089,12 +1120,13 @@ export function CloudAutomationRow({
             : formatTimeUntil(nextRunAt, now)
       }
       nextRunAt={nextRunAt}
-      enabled={automation.enabled}
       muted={!automation.enabled}
-      openLabel="Open Cloud thread"
+      repo={repo}
+      runs={runs}
       onOpen={() => actions.onOpen(automation)}
       actions={
         <>
+          {leading}
           {isCloudWebhook(automation) ? (
             <ResourceActionButton
               label="New webhook URL"
@@ -1172,7 +1204,7 @@ function AutomationProblemRow({
       description={
         <AutomationRowMetadata automation={repairTarget} project={project} />
       }
-      className="items-start"
+      className={cn("items-start", OFFSCREEN_ROW_CLASSES)}
       onOpen={() =>
         onNavigate(route, repairTarget === null ? undefined : { editing: true })
       }
@@ -1204,16 +1236,6 @@ function automationProblemSearchText(
   return automation.problem === "missing-agent-prompt"
     ? `${automationProblemLabel(automation)} needs prompt missing prompt`
     : `${automationProblemLabel(automation)} invalid stored data`;
-}
-
-function matchesAutomationReadStatusFilters(
-  automation: OverviewEntry["automation"],
-  statusFilters: readonly AutomationStatusFilter[],
-): boolean {
-  if ("problem" in automation && automation.problem === "invalid-stored-data") {
-    return statusFilters.length === 0;
-  }
-  return matchesAutomationStatusFilters(automation, statusFilters);
 }
 
 function automationSearchValues(
@@ -1333,6 +1355,11 @@ function NewLoopMenu({
   );
 }
 
+type LoopScope = "all" | "off" | `repo:${string}`;
+
+const repoScope = (projectId: string | null | undefined): LoopScope =>
+  `repo:${projectId ?? "none"}`;
+
 export function AutomationOverviewView({
   entries,
   error,
@@ -1386,12 +1413,7 @@ export function AutomationOverviewView({
   const [query, setQuery] = useState("");
   const [reviewLayout, setReviewLayout] = useState<ReviewLayout>("list");
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("to-review");
-  const [projectFilters, setProjectFilters] = useState<
-    AutomationProjectFilter[]
-  >([]);
-  const [statusFilters, setStatusFilters] = useState<AutomationStatusFilter[]>(
-    [],
-  );
+  const [scope, setScope] = useState<LoopScope>("all");
   const [sortMode, setSortMode] = useState<AutomationSortMode>("next");
   const [sortDirection, setSortDirection] =
     useState<AutomationSortDirection>("asc");
@@ -1431,30 +1453,10 @@ export function AutomationOverviewView({
   const now = useMinuteClock();
 
   const normalizedQuery = query.trim().toLowerCase();
-  const projectCounts = useMemo(() => {
-    const counts = new Map<AutomationProjectFilter, number>();
-    for (const entry of entries ?? []) {
-      const project = automationProjectFilterId(entry);
-      counts.set(project, (counts.get(project) ?? 0) + 1);
-    }
-    return counts;
-  }, [entries]);
-  const projectBucketCount = projectCounts.size;
-  const projectOptions = useMemo(() => {
-    const options = new Map<AutomationProjectFilter, string>();
-    for (const entry of entries ?? []) {
-      options.set(
-        automationProjectFilterId(entry),
-        automationProjectLabel(entry.project),
-      );
-    }
-    return [...options].map(([id, label]) => ({ id, label }));
-  }, [entries]);
-  useEffect(() => {
-    setProjectFilters((current) =>
-      current.filter((project) => projectCounts.has(project)),
-    );
-  }, [projectCounts]);
+  const projectBucketCount = useMemo(
+    () => new Set((entries ?? []).map((entry) => entry.project.id)).size,
+    [entries],
+  );
   useEffect(() => {
     if (sortMode === "project" && projectBucketCount <= 1) {
       setSortMode("next");
@@ -1463,25 +1465,14 @@ export function AutomationOverviewView({
   }, [projectBucketCount, sortMode]);
   const filteredEntries = useMemo(() => {
     if (entries === null) return [];
-    return entries.filter((entry) => {
-      const { automation, project } = entry;
-      if (
-        projectFilters.length > 0 &&
-        !projectFilters.includes(automationProjectFilterId(entry))
-      ) {
-        return false;
-      }
-      if (!matchesAutomationReadStatusFilters(automation, statusFilters)) {
-        return false;
-      }
-      return (
+    return entries.filter(
+      ({ automation, project }) =>
         normalizedQuery.length === 0 ||
         automationSearchValues(automation, project.name).some((value) =>
           value.toLowerCase().includes(normalizedQuery),
-        )
-      );
-    });
-  }, [entries, normalizedQuery, projectFilters, statusFilters]);
+        ),
+    );
+  }, [entries, normalizedQuery]);
   const visibleEntries = useMemo(() => {
     return [...filteredEntries].sort((left, right) => {
       if ("problem" in left.automation && "problem" in right.automation) {
@@ -1513,21 +1504,14 @@ export function AutomationOverviewView({
       return applyAutomationSortDirection(base, sortDirection);
     });
   }, [filteredEntries, sortDirection, sortMode]);
-  const activeEntries = visibleEntries.filter(isActiveEntry);
-  const inactiveEntries = visibleEntries.filter(
-    (entry) => !isActiveEntry(entry),
-  );
   const cloudRows = cloud?.rows ?? [];
   const openCloud = cloudRows.find((row) => row.id === openCloudId);
   const visibleCloud = cloudRows.filter(
     (automation) =>
-      projectFilters.length === 0 &&
-      (statusFilters.length === 0 ||
-        statusFilters.includes(automation.enabled ? "active" : "paused")) &&
-      (normalizedQuery === "" ||
-        [automation.name, "Cloud"].some((value) =>
-          value.toLowerCase().includes(normalizedQuery),
-        )),
+      normalizedQuery === "" ||
+      [automation.name, "Cloud"].some((value) =>
+        value.toLowerCase().includes(normalizedQuery),
+      ),
   );
   const handleSortChange = useCallback(
     (nextSort: string) => {
@@ -1549,6 +1533,54 @@ export function AutomationOverviewView({
     [projectBucketCount, sortMode],
   );
 
+  const repoOf = (projectId: string | null | undefined, fallback?: string) => {
+    const project = templates?.projects?.find((item) => item.id === projectId);
+    const github = project?.github ?? null;
+    return {
+      label: github?.split("/")[1] ?? project?.name ?? fallback ?? "Other",
+      github,
+    };
+  };
+  const repos = new Map<LoopScope, LoopMenuItem<LoopScope>>();
+  let offCount = 0;
+  const countRepo = (
+    projectId: string | null | undefined,
+    fallback?: string,
+  ) => {
+    const id = repoScope(projectId);
+    const item = repos.get(id);
+    if (item) {
+      item.count += 1;
+      return;
+    }
+    const repo = repoOf(projectId, fallback);
+    repos.set(id, {
+      id,
+      label: repo.label,
+      icon: repo.github ? "GithubLogo" : "Laptop",
+      count: 1,
+      title: repo.github ?? repo.label,
+    });
+  };
+  for (const entry of entries ?? []) {
+    if (isActiveEntry(entry)) countRepo(entry.project.id, entry.project.name);
+    else offCount += 1;
+  }
+  for (const automation of cloudRows) {
+    if (automation.enabled) countRepo(automation.project_id);
+    else offCount += 1;
+  }
+  const repoItems = [...repos.values()].sort(
+    (left, right) =>
+      right.count - left.count || left.label.localeCompare(right.label),
+  );
+  const activeScope =
+    scope === "all" || scope === "off" || repos.has(scope) ? scope : "all";
+  const inScope = (projectId: string | null | undefined) =>
+    activeScope === "all" ||
+    activeScope === "off" ||
+    activeScope === repoScope(projectId);
+
   let body: ReactNode;
   if (error !== null) {
     body = (
@@ -1562,28 +1594,38 @@ export function AutomationOverviewView({
     );
   } else if (entries.length === 0 && cloudRows.length === 0) {
     body = <ResourceListState state="empty" message="No loops yet." />;
-  } else if (visibleEntries.length === 0 && visibleCloud.length === 0) {
-    body = (
-      <ResourceListState
-        state="empty"
-        message={
-          normalizedQuery === ""
-            ? "No loops match these filters."
-            : projectFilters.length > 0 || statusFilters.length > 0
-              ? `No loops match "${query}" with these filters.`
-              : `No loops match "${query}"`
-        }
-      />
-    );
   } else {
+    const reviewItems = review?.data?.items ?? [];
+    const scopedReview = reviewItems.filter((item) =>
+      inScope(item.loop.projectId),
+    );
+    // Cloud runs carry no loop ID, only the name, and templates reuse names across repos.
+    const reviewKey = (item: (typeof reviewItems)[number]) =>
+      item.loop.id ?? cloudLoopKey(item.loop.projectId, item.loop.name);
     const needsYou = new Map<string, number>();
-    for (const item of review?.data?.items ?? []) {
+    for (const item of reviewItems) {
       if (item.status !== "needs-you" || item.reviewedAt !== null) continue;
-      const key = item.loop.id ?? item.loop.name;
+      const key = reviewKey(item);
       needsYou.set(key, (needsYou.get(key) ?? 0) + 1);
     }
-    const projectOf = (id: string | null | undefined) =>
-      templates?.projects?.find((project) => project.id === id);
+    const history = new Map<string, RunTick[]>();
+    const reports = new Map<string, string>();
+    for (const item of [...reviewItems].sort((a, b) => a.at - b.at)) {
+      const key = reviewKey(item);
+      if (item.report) reports.set(key, item.report);
+      if (item.status === "running") continue;
+      const runs = history.get(key) ?? [];
+      runs.push(item.status);
+      history.set(key, runs);
+    }
+    const showRepo = repoItems.length > 1 && !activeScope.startsWith("repo:");
+    const repoTag = (
+      projectId: string | null | undefined,
+      fallback?: string,
+    ) =>
+      showRepo ? (
+        <LoopRepoTag projectId={projectId} {...repoOf(projectId, fallback)} />
+      ) : undefined;
     const renderEntry = ({
       automation,
       project,
@@ -1600,12 +1642,13 @@ export function AutomationOverviewView({
         <OverviewRow
           key={automation.id}
           automation={automation}
-          project={project}
           scriptAgents={scriptAgents}
           providers={providers}
-          github={projectOf(project.id)?.github}
           now={now}
           needsYou={needsYou.get(automation.id) ?? 0}
+          runs={history.get(automation.id)}
+          report={reports.get(automation.id) ?? null}
+          repo={repoTag(project.id, project.name)}
           leading={
             <LoopPriorityMenu
               priority={localPriority({
@@ -1615,7 +1658,10 @@ export function AutomationOverviewView({
               name={automation.name}
               onChange={(priority) =>
                 setLocalPriority(
-                  { projectId: automation.projectId, automationId: automation.id },
+                  {
+                    projectId: automation.projectId,
+                    automationId: automation.id,
+                  },
                   priority,
                 )
               }
@@ -1648,10 +1694,12 @@ export function AutomationOverviewView({
         <CloudAutomationRow
           key={automation.id}
           automation={automation}
-          project={projectOf(automation.project_id)}
           providers={providers}
           now={now}
-          needsYou={needsYou.get(automation.name) ?? 0}
+          needsYou={needsYou.get(cloudKey(automation)) ?? 0}
+          runs={history.get(cloudKey(automation))}
+          report={reports.get(cloudKey(automation)) ?? null}
+          repo={repoTag(automation.project_id)}
           leading={
             <LoopPriorityMenu
               priority={cloudPriority(automation)}
@@ -1666,156 +1714,205 @@ export function AutomationOverviewView({
         />
       ) : null,
     });
-    const problems = activeEntries.filter(
-      (entry) => "problem" in entry.automation,
+    const grid = (items: readonly ListItem[]) => (
+      <div className="grid grid-cols-1 gap-3.5 @2xl:grid-cols-2">
+        {items.map((item) => item.node)}
+      </div>
     );
-    const activeRest = [
-      ...activeEntries
-        .filter((entry) => !("problem" in entry.automation))
-        .map(localItem),
-      ...visibleCloud.filter((automation) => automation.enabled).map(cloudItem),
-    ];
-    const activeItems =
-      sortMode === "next"
-        ? sortByNextRun(activeRest, sortDirection)
-        : sortMode === "alpha"
-          ? sortByName(activeRest, sortDirection)
-          : activeRest;
-    const inactiveRest = [
-      ...inactiveEntries.map(localItem),
-      ...visibleCloud
-        .filter((automation) => !automation.enabled)
-        .map(cloudItem),
-    ];
-    const inactiveItems =
-      sortMode === "alpha"
-        ? sortByName(inactiveRest, sortDirection)
-        : inactiveRest;
-    const nextRunAt = Math.min(
-      ...activeItems.flatMap((item) => item.nextRunAt ?? []),
-    );
-    const startOfToday = new Date(now).setHours(0, 0, 0, 0);
-    const failedToday = (review?.data?.items ?? []).filter(
-      (item) =>
-        item.status === "failed" &&
-        item.reviewedAt === null &&
-        item.at >= startOfToday,
-    ).length;
-    const needsYouTotal = [...needsYou.values()].reduce(
-      (sum, count) => sum + count,
-      0,
-    );
-    const finished = (review?.data?.items ?? [])
-      .filter((item) => item.status !== "running")
-      .sort((a, b) => a.at - b.at);
-    const history = new Map<string, OrbitTick[]>();
-    for (const item of finished) {
-      const key = item.loop.id ?? item.loop.name;
-      history.set(key, [...(history.get(key) ?? []), item.status as OrbitTick]);
-    }
-    const activeLocal = activeEntries.flatMap((entry) =>
-      "problem" in entry.automation ? [] : [entry.automation],
-    );
-    const activeCloud = visibleCloud.filter((automation) => automation.enabled);
-    const orbitLoops = [
-      ...activeLocal.map((automation) => ({
-        key: automation.id,
-        perDay: cronRunsPerDay(
-          automation.trigger.triggerType === "schedule"
-            ? automation.trigger.cron
-            : null,
-        ),
-      })),
-      ...activeCloud.map((automation) => ({
-        key: automation.name,
-        perDay: cronRunsPerDay(automation.cron),
-      })),
-    ];
-    const rings = orbitLoops
-      .map((loop) => history.get(loop.key)?.slice(-ORBIT_TICKS) ?? [])
-      .sort((a, b) => b.length - a.length)
-      .slice(0, 5)
-      .map((ticks) => [
-        ...Array<OrbitTick>(ORBIT_TICKS - ticks.length).fill(null),
-        ...ticks,
-      ]);
-    const nextItem = activeItems.find((item) => item.nextRunAt === nextRunAt);
-    body = (
-      <div className="pb-6">
-        <LoopOrbit
-          rings={rings}
-          running={activeItems.length}
-          cloud={activeCloud.length}
-          runsPerDay={orbitLoops.reduce((sum, loop) => sum + loop.perDay, 0)}
-          totalRuns={
-            (entries ?? []).reduce(
-              (sum, { automation }) =>
-                sum + ("problem" in automation ? 0 : automation.runCount),
-              0,
-            ) + cloudRows.reduce((sum, automation) => sum + automation.runs, 0)
-          }
-          ownPercent={
-            finished.length === 0
-              ? null
-              : Math.round(
-                  (100 *
-                    finished.filter((item) => item.status === "done").length) /
-                    finished.length,
-                )
-          }
-          needsYou={needsYouTotal}
-          failedToday={failedToday}
-          next={
-            nextItem && Number.isFinite(nextRunAt)
-              ? { name: nextItem.name, at: nextRunAt }
-              : null
-          }
-          now={now}
-          onReview={review ? () => onModeChange("review") : undefined}
-        />
-        {problems.length > 0 ? (
-          <div className="mt-6 divide-y divide-foreground/10">
-            {problems.map(renderEntry)}
-          </div>
-        ) : null}
-        {activeItems.length === 0 ? (
-          <div className="mt-8 rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
-            No loops running.
+    let content: ReactNode;
+    if (activeScope === "off") {
+      const offRest = [
+        ...visibleEntries
+          .filter((entry) => !isActiveEntry(entry))
+          .map(localItem),
+        ...visibleCloud
+          .filter((automation) => !automation.enabled)
+          .map(cloudItem),
+      ];
+      const offItems =
+        sortMode === "alpha" ? sortByName(offRest, sortDirection) : offRest;
+      content =
+        offItems.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
+            {normalizedQuery === ""
+              ? "No paused loops."
+              : `No paused loops match "${query}".`}
           </div>
         ) : (
-          <div className="mt-2">
-            {LOOP_PRIORITIES.map((priority) => {
-              const group = activeItems.filter(
-                (item) => item.priority === priority,
-              );
-              if (group.length === 0) return null;
-              return (
-                <section key={priority} aria-label={`Priority ${priority}`}>
-                  <LoopGroupDivider
-                    label={`P${priority}`}
-                    count={group.length}
-                    className={LOOP_PRIORITY_STYLE[priority].text}
-                  />
-                  <div className="space-y-2.5">
-                    {group.map((item) => item.node)}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        )}
-        {inactiveItems.length > 0 ? (
-          <section aria-label="Off" className="mt-4">
+          <section aria-label="Off" className="-mt-6">
             <LoopGroupDivider
               label="Off"
-              count={inactiveItems.length}
+              count={offItems.length}
               className="text-muted-foreground"
             />
-            <div className="space-y-2.5">
-              {inactiveItems.map((item) => item.node)}
-            </div>
+            {grid(offItems)}
           </section>
-        ) : null}
+        );
+    } else {
+      const activeEntries = visibleEntries.filter(
+        (entry) => isActiveEntry(entry) && inScope(entry.project.id),
+      );
+      const problems = activeEntries.filter(
+        (entry) => "problem" in entry.automation,
+      );
+      const activeLocal = activeEntries.flatMap((entry) =>
+        "problem" in entry.automation ? [] : [entry.automation],
+      );
+      const activeCloud = visibleCloud.filter(
+        (automation) => automation.enabled && inScope(automation.project_id),
+      );
+      const activeRest = [
+        ...activeEntries
+          .filter((entry) => !("problem" in entry.automation))
+          .map(localItem),
+        ...activeCloud.map(cloudItem),
+      ];
+      const activeItems =
+        sortMode === "next"
+          ? sortByNextRun(activeRest, sortDirection)
+          : sortMode === "alpha"
+            ? sortByName(activeRest, sortDirection)
+            : activeRest;
+      const nextRunAt = Math.min(
+        ...activeItems.flatMap((item) => item.nextRunAt ?? []),
+      );
+      const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+      const failedToday = scopedReview.filter(
+        (item) =>
+          item.status === "failed" &&
+          item.reviewedAt === null &&
+          item.at >= startOfToday,
+      ).length;
+      const needsYouTotal = scopedReview.filter(
+        (item) => item.status === "needs-you" && item.reviewedAt === null,
+      ).length;
+      const finished = scopedReview.filter((item) => item.status !== "running");
+      const orbitLoops = [
+        ...activeLocal.map((automation) => ({
+          key: automation.id,
+          perDay: cronRunsPerDay(
+            automation.trigger.triggerType === "schedule"
+              ? automation.trigger.cron
+              : null,
+          ),
+        })),
+        ...activeCloud.map((automation) => ({
+          key: cloudKey(automation),
+          perDay: cronRunsPerDay(automation.cron),
+        })),
+      ];
+      const rings = orbitLoops
+        .map((loop) => history.get(loop.key)?.slice(-ORBIT_TICKS) ?? [])
+        .sort((a, b) => b.length - a.length)
+        .slice(0, 5)
+        .map((ticks) => [
+          ...Array<OrbitTick>(ORBIT_TICKS - ticks.length).fill(null),
+          ...ticks,
+        ]);
+      const nextItem = activeItems.find((item) => item.nextRunAt === nextRunAt);
+      content = (
+        <>
+          <LoopOrbit
+            rings={rings}
+            running={activeItems.length}
+            cloud={activeCloud.length}
+            runsPerDay={orbitLoops.reduce((sum, loop) => sum + loop.perDay, 0)}
+            totalRuns={
+              entries.reduce(
+                (sum, { automation, project }) =>
+                  sum +
+                  ("problem" in automation || !inScope(project.id)
+                    ? 0
+                    : automation.runCount),
+                0,
+              ) +
+              cloudRows.reduce(
+                (sum, automation) =>
+                  sum + (inScope(automation.project_id) ? automation.runs : 0),
+                0,
+              )
+            }
+            ownPercent={
+              finished.length === 0
+                ? null
+                : Math.round(
+                    (100 *
+                      finished.filter((item) => item.status === "done")
+                        .length) /
+                      finished.length,
+                  )
+            }
+            needsYou={needsYouTotal}
+            failedToday={failedToday}
+            next={
+              nextItem && Number.isFinite(nextRunAt)
+                ? { name: nextItem.name, at: nextRunAt }
+                : null
+            }
+            now={now}
+            onReview={review ? () => onModeChange("review") : undefined}
+          />
+          {problems.length > 0 ? (
+            <div className="mt-6 divide-y divide-foreground/10">
+              {problems.map(renderEntry)}
+            </div>
+          ) : null}
+          {activeItems.length === 0 ? (
+            <div className="mt-8 rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
+              {normalizedQuery === ""
+                ? "No loops running."
+                : `No loops match "${query}".`}
+            </div>
+          ) : (
+            <div className="mt-2">
+              {LOOP_PRIORITIES.map((priority) => {
+                const group = activeItems.filter(
+                  (item) => item.priority === priority,
+                );
+                if (group.length === 0) return null;
+                return (
+                  <section key={priority} aria-label={`Priority ${priority}`}>
+                    <LoopGroupDivider
+                      label={`P${priority}`}
+                      count={group.length}
+                      className={LOOP_PRIORITY_STYLE[priority].text}
+                    />
+                    {grid(group)}
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </>
+      );
+    }
+    body = (
+      <div className="@container">
+        <div className="grid items-start gap-7 pb-6 @2xl:grid-cols-[10rem_minmax(0,1fr)]">
+          <LoopSideMenu
+            label="Repos"
+            heading="Repos"
+            value={activeScope}
+            onChange={setScope}
+            items={[
+              {
+                id: "all",
+                label: "All",
+                icon: "GridView",
+                count: repoItems.reduce((sum, item) => sum + item.count, 0),
+              },
+              ...repoItems,
+              {
+                id: "off",
+                label: "Off",
+                icon: "Pause",
+                count: offCount,
+                separated: true,
+              },
+            ]}
+          />
+          <div className="@container min-w-0">{content}</div>
+        </div>
       </div>
     );
   }
@@ -1836,11 +1933,6 @@ export function AutomationOverviewView({
           : undefined
       }
       underlineTabs
-      bandClassName={
-        activeMode === "installed" && !templatesInOverview
-          ? OVERVIEW_BAND_CLASSES
-          : undefined
-      }
       modes={[
         {
           id: "installed",
@@ -1875,30 +1967,6 @@ export function AutomationOverviewView({
                   className="h-8 border-0 bg-muted/50 pl-8 text-sm"
                 />
               </div>
-              <ResourceFilterMenu
-                compact
-                quiet
-                groups={[
-                  {
-                    id: "projects",
-                    label: "Projects",
-                    options: projectOptions,
-                    selectedValues: projectFilters,
-                    onChange: (values) =>
-                      setProjectFilters(
-                        values.filter(isAutomationProjectFilter),
-                      ),
-                  },
-                  {
-                    id: "status",
-                    label: "Status",
-                    options: AUTOMATION_STATUS_FILTER_OPTIONS,
-                    selectedValues: statusFilters,
-                    onChange: (values) =>
-                      setStatusFilters(values.filter(isAutomationStatusFilter)),
-                  },
-                ]}
-              />
               <ResourceSortMenu
                 value={sortMode}
                 direction={sortDirection}
@@ -1968,7 +2036,7 @@ export function AutomationOverviewView({
         </ResourceCollectionViewport>
       ) : (
         <ResourceCollectionViewport scrollId="automations-installed-results">
-          <div className={OVERVIEW_BAND_CLASSES}>{body}</div>
+          {body}
         </ResourceCollectionViewport>
       )}
       {openCloud && cloud ? (

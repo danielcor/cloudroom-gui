@@ -35,9 +35,13 @@ function hostWindowFromBrowserIpcEvent(
 function registerRequestCommand<T>(
   channel: string,
   schema: z.ZodType<T>,
+  isTrustedSender: (event: IpcMainEvent) => boolean,
   run: (args: { hostWindow: BrowserWindow; request: T }) => void,
 ): void {
   ipcMain.on(channel, (event, payload: unknown) => {
+    if (!isTrustedSender(event)) {
+      return;
+    }
     const hostWindow = hostWindowFromBrowserIpcEvent(event);
     if (hostWindow === null) {
       return;
@@ -52,73 +56,80 @@ function registerRequestCommand<T>(
 
 export function registerDesktopBrowserIpc(
   manager: DesktopBrowserViewManager,
+  isTrustedSender: (event: IpcMainEvent) => boolean,
 ): void {
-  registerRequestCommand(
+  const command = <T>(
+    channel: string,
+    schema: z.ZodType<T>,
+    run: (args: { hostWindow: BrowserWindow; request: T }) => void,
+  ): void => registerRequestCommand(channel, schema, isTrustedSender, run);
+
+  command(
     BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
     bbDesktopBrowserAttachRequestSchema,
     (args) => manager.attach(args),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
     bbDesktopBrowserNavigateRequestSchema,
     (args) => manager.navigate(args),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
     bbDesktopBrowserSetBoundsRequestSchema,
     (args) => manager.setBounds(args),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
     bbDesktopBrowserSetVisibleRequestSchema,
     (args) => manager.setVisible(args),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
     bbDesktopBrowserSetVisibleRequestSchema,
     (args) => manager.setVisibleWithoutFocus(args),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
     bbDesktopBrowserFindInPageRequestSchema,
     (args) => manager.findInPage(args),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
     bbDesktopBrowserStopFindInPageRequestSchema,
     (args) => manager.stopFindInPage(args),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_DETACH_CHANNEL,
     bbDesktopBrowserTabRefSchema,
     ({ hostWindow, request }) =>
       manager.detach({ hostWindow, tabId: request.tabId }),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_FOCUS_CHANNEL,
     bbDesktopBrowserTabRefSchema,
     ({ hostWindow, request }) =>
       manager.focus({ hostWindow, tabId: request.tabId }),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_GO_BACK_CHANNEL,
     bbDesktopBrowserTabRefSchema,
     ({ hostWindow, request }) =>
       manager.goBack({ hostWindow, tabId: request.tabId }),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
     bbDesktopBrowserTabRefSchema,
     ({ hostWindow, request }) =>
       manager.goForward({ hostWindow, tabId: request.tabId }),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_RELOAD_CHANNEL,
     bbDesktopBrowserTabRefSchema,
     ({ hostWindow, request }) =>
       manager.reload({ hostWindow, tabId: request.tabId }),
   );
-  registerRequestCommand(
+  command(
     BB_DESKTOP_BROWSER_STOP_CHANNEL,
     bbDesktopBrowserTabRefSchema,
     ({ hostWindow, request }) =>

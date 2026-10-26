@@ -18,7 +18,9 @@ import {
   session,
   shell,
   type Event,
+  type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type PermissionRequest,
   type WebContents,
 } from "electron";
 import { autoUpdater } from "electron-updater";
@@ -63,6 +65,13 @@ import {
   readForeignRuntimeDetails,
   stopForeignRuntime,
 } from "./foreign-runtime.js";
+import {
+  decideAppWindowNavigation,
+  isAllowedAppPermission,
+  isAppWindowMainFrame,
+  isHttpOrigin,
+  isSensitiveAppSender,
+} from "./desktop-app-window-policy.js";
 import { createLocalViewUrl, STARTUP_RETRY_CHANNEL } from "./local-view.js";
 import { installApplicationMenu } from "./menu.js";
 import {
@@ -1571,6 +1580,110 @@ async function loadWindowUrl(args: LoadWindowUrlArgs): Promise<void> {
   await desktopWindowFactory.loadUrl({ url: args.url });
 }
 
+// The app window may only be navigated by the main process (loadURL, which does not fire these
+// events) or reloaded; its authorized loads may still redirect. Any other renderer-initiated
+// navigation is blocked, so an untrusted page can never inherit this window's preload, IPC, or
+// permissions. Web links are handed to the system browser instead. Installed at window creation,
+// before the first load, so no window is ever unguarded.
+function installAppWindowNavigationGuard(webContents: WebContents): void {
+  const guard = (
+    event: Event,
+    targetUrl: string,
+    isMainFrame: boolean,
+    kind: "navigate" | "redirect",
+  ): void => {
+    const decision = decideAppWindowNavigation({
+      kind,
+      isMainFrame,
+      targetUrl,
+      committedUrl: webContents.getURL(),
+    });
+    if (decision.allow) {
+      return;
+    }
+    event.preventDefault();
+    if (decision.openExternally) {
+      void shell.openExternal(targetUrl);
+    }
+  };
+  webContents.on("will-frame-navigate", (event) => {
+    guard(event, event.url, event.isMainFrame, "navigate");
+  });
+  webContents.on("will-redirect", (event) => {
+    guard(event, event.url, event.isMainFrame, "redirect");
+  });
+}
+
+function permissionRequestIsAudioOnly(details: {
+  mediaTypes?: Array<"video" | "audio">;
+}): boolean {
+  const types = details.mediaTypes;
+  return (
+    types !== undefined &&
+    types.length > 0 &&
+    types.every((type) => type === "audio")
+  );
+}
+
+// The app window uses the default session. Deny every sensitive web permission by default, and
+// allow only the few the app itself needs, and only from an app window's own main frame on a real
+// http(s) origin (never a sub-frame such as a sandboxed preview). The embedded browser uses its
+// own partitions with their own handlers, so it is unaffected.
+function installDefaultSessionPermissionHandlers(): void {
+  session.defaultSession.setPermissionRequestHandler(
+    (webContents, permission, callback, details) => {
+      callback(
+        isAllowedAppPermission({
+          permission,
+          isAppWindowMainFrame:
+            applicationWindowWebContentsIds.has(webContents.id) &&
+            (details as PermissionRequest).isMainFrame,
+          originIsHttp: isHttpOrigin(webContents.mainFrame.origin),
+          mediaAudioOnly:
+            permission === "media" &&
+            permissionRequestIsAudioOnly(
+              details as { mediaTypes?: Array<"video" | "audio"> },
+            ),
+        }),
+      );
+    },
+  );
+  session.defaultSession.setPermissionCheckHandler(
+    (webContents, permission, requestingOrigin, details) =>
+      webContents !== null &&
+      isAllowedAppPermission({
+        permission,
+        isAppWindowMainFrame:
+          applicationWindowWebContentsIds.has(webContents.id) &&
+          details.isMainFrame,
+        originIsHttp: isHttpOrigin(requestingOrigin),
+        mediaAudioOnly: permission === "media" && details.mediaType === "audio",
+      }),
+  );
+}
+
+// Privileged IPC must come from an app window's own main frame on a real http(s) origin, never a
+// navigated-away page or an embedded (sandboxed) preview sub-frame that shares the webContents id.
+function isPrivilegedAppSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return isSensitiveAppSender({
+    isAppWindow: applicationWindowWebContentsIds.has(event.sender.id),
+    isMainFrame: event.senderFrame === event.sender.mainFrame,
+    senderOrigin: event.senderFrame?.origin ?? null,
+  });
+}
+
+// The startup loading/error views (a data: URL, opaque origin) legitimately read non-sensitive
+// desktop info and answer close-window requests, so these channels require only an app-window
+// main frame.
+function isAppWindowMainFrameSender(
+  event: IpcMainEvent | IpcMainInvokeEvent,
+): boolean {
+  return isAppWindowMainFrame({
+    isAppWindow: applicationWindowWebContentsIds.has(event.sender.id),
+    isMainFrame: event.senderFrame === event.sender.mainFrame,
+  });
+}
+
 let loadingLogoSrc: string | null = null;
 
 function getLoadingLogoSrc(): string {
@@ -1632,7 +1745,6 @@ async function createApplicationWindow(
     initialUrl: args.initialUrl,
     stateKey: args.stateKey,
   });
-  registerApplicationWindow(browserWindow);
   if (bbAppLoaded && shouldOpenDevTools()) {
     browserWindow.webContents.openDevTools({ mode: "detach" });
   }
@@ -1777,38 +1889,49 @@ async function installDownloadedUpdate(): Promise<void> {
 }
 
 function registerDesktopUpdateIpc(): void {
-  ipcMain.handle(BB_DESKTOP_GET_INFO_CHANNEL, () => {
+  ipcMain.handle(BB_DESKTOP_GET_INFO_CHANNEL, (event) => {
+    if (!isAppWindowMainFrameSender(event)) return null;
     return getCurrentDesktopInfo();
   });
   ipcMain.handle(BB_DESKTOP_GET_WINDOW_STATE_CHANNEL, (event) => {
+    if (!isAppWindowMainFrameSender(event)) return null;
     return getSenderDesktopWindowState(event);
   });
-  ipcMain.handle(BB_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL, async () => {
+  ipcMain.handle(BB_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL, async (event) => {
+    if (!isPrivilegedAppSender(event)) return;
     await openServerDaemonLogs();
   });
-  ipcMain.handle(BB_DESKTOP_OPEN_COMPUTER_CHANNEL, async (_event, handle: unknown) => {
+  ipcMain.handle(BB_DESKTOP_OPEN_COMPUTER_CHANNEL, async (event, handle: unknown) => {
+    if (!isPrivilegedAppSender(event)) return;
     await openComputerTarget(typeof handle === "string" ? handle : null);
   });
-  ipcMain.handle(BB_DESKTOP_CHECK_FOR_UPDATES_CHANNEL, async () => {
+  ipcMain.handle(BB_DESKTOP_CHECK_FOR_UPDATES_CHANNEL, async (event) => {
+    if (!isPrivilegedAppSender(event)) return null;
     await Promise.all([
       desktopUpdateService?.checkForUpdates() ?? Promise.resolve(null),
       desktopAutoUpdateService?.checkForUpdates() ?? Promise.resolve(null),
     ]);
     return getCurrentDesktopInfo();
   });
-  ipcMain.handle(BB_DESKTOP_INSTALL_UPDATE_CHANNEL, installDownloadedUpdate);
-  ipcMain.on(BB_DESKTOP_SET_THEME_CHANNEL, (_event, payload: unknown) => {
+  ipcMain.handle(BB_DESKTOP_INSTALL_UPDATE_CHANNEL, (event) => {
+    if (!isPrivilegedAppSender(event)) return;
+    return installDownloadedUpdate();
+  });
+  ipcMain.on(BB_DESKTOP_SET_THEME_CHANNEL, (event, payload: unknown) => {
+    if (!isPrivilegedAppSender(event)) return;
     const parsed = bbDesktopThemeSchema.safeParse(payload);
     if (!parsed.success) {
       return;
     }
     nativeTheme.themeSource = parsed.data;
   });
-  ipcMain.on(BB_DESKTOP_SET_BADGE_COUNT_CHANNEL, (_event, payload: unknown) => {
+  ipcMain.on(BB_DESKTOP_SET_BADGE_COUNT_CHANNEL, (event, payload: unknown) => {
+    if (!isPrivilegedAppSender(event)) return;
     const parsed = z.number().int().nonnegative().safeParse(payload);
     if (parsed.success) app.setBadgeCount(parsed.data);
   });
   ipcMain.on(BB_DESKTOP_FOCUS_WINDOW_CHANNEL, (event) => {
+    if (!isPrivilegedAppSender(event)) return;
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) return;
     if (window.isMinimized()) window.restore();
@@ -1830,6 +1953,7 @@ function registerDesktopUpdateIpc(): void {
   });
 
   ipcMain.on(BB_DESKTOP_CLOSE_WINDOW_RESPONSE_CHANNEL, (event, payload) => {
+    if (!isAppWindowMainFrameSender(event)) return;
     const pending = pendingCloseWindowRequests.get(event.sender.id);
     if (pending !== undefined) {
       clearTimeout(pending);
@@ -1841,7 +1965,8 @@ function registerDesktopUpdateIpc(): void {
   });
   ipcMain.on(
     BB_DESKTOP_OPEN_EXTERNAL_URL_CHANNEL,
-    (_event, payload: unknown) => {
+    (event, payload: unknown) => {
+      if (!isPrivilegedAppSender(event)) return;
       if (typeof payload !== "string") {
         return;
       }
@@ -2282,6 +2407,7 @@ async function runDesktopApp(): Promise<void> {
   });
 
   await app.whenReady();
+  installDefaultSessionPermissionHandlers();
   if (app.isPackaged) {
     await session.defaultSession.clearCache();
   }
@@ -2561,7 +2687,7 @@ async function runDesktopApp(): Promise<void> {
       });
     },
   });
-  registerDesktopBrowserIpc(desktopBrowserViewManager);
+  registerDesktopBrowserIpc(desktopBrowserViewManager, isPrivilegedAppSender);
   const browserImportService = createBrowserImportService({
     context: { platform: process.platform, home: homedir() },
     resolveIcon: (appPath) => readMacAppIcon(appPath),
@@ -2579,7 +2705,7 @@ async function runDesktopApp(): Promise<void> {
   ipcMain.handle(
     BB_DESKTOP_BROWSER_LIST_IMPORT_SOURCES_CHANNEL,
     async (event) => {
-      if (!applicationWindowWebContentsIds.has(event.sender.id)) return null;
+      if (!isPrivilegedAppSender(event)) return null;
       return { sources: await browserImportService.listSources() };
     },
   );
@@ -2588,11 +2714,7 @@ async function runDesktopApp(): Promise<void> {
     async (event, payload: unknown) => {
       const parsed =
         bbDesktopBrowserImportCookiesRequestSchema.safeParse(payload);
-      if (
-        !parsed.success ||
-        !applicationWindowWebContentsIds.has(event.sender.id)
-      )
-        return null;
+      if (!parsed.success || !isPrivilegedAppSender(event)) return null;
       const manager = desktopBrowserViewManager;
       if (!manager) return null;
       return browserImportService.importCookies(
@@ -2607,10 +2729,7 @@ async function runDesktopApp(): Promise<void> {
   ipcMain.on(
     BB_DESKTOP_BROWSER_OPEN_FULL_DISK_ACCESS_SETTINGS_CHANNEL,
     (event) => {
-      if (
-        !applicationWindowWebContentsIds.has(event.sender.id) ||
-        process.platform !== "darwin"
-      )
+      if (!isPrivilegedAppSender(event) || process.platform !== "darwin")
         return;
       void shell.openExternal(
         "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
@@ -2618,7 +2737,7 @@ async function runDesktopApp(): Promise<void> {
     },
   );
   ipcMain.handle(BB_DESKTOP_BROWSER_TARGET_CHANNEL, (event) => {
-    return applicationWindowWebContentsIds.has(event.sender.id)
+    return isPrivilegedAppSender(event)
       ? (desktopBrowserBroker?.getTarget(event.sender.id) ?? null)
       : null;
   });
@@ -2626,8 +2745,7 @@ async function runDesktopApp(): Promise<void> {
     BB_DESKTOP_BROWSER_GET_CONTROL_CHANNEL,
     (event, payload: unknown) => {
       const parsed = bbDesktopBrowserTabRefSchema.safeParse(payload);
-      return parsed.success &&
-        applicationWindowWebContentsIds.has(event.sender.id)
+      return parsed.success && isPrivilegedAppSender(event)
         ? (desktopBrowserBroker?.getControl(
             event.sender.id,
             parsed.data.tabId,
@@ -2639,10 +2757,7 @@ async function runDesktopApp(): Promise<void> {
     BB_DESKTOP_BROWSER_RELEASE_CONTROL_CHANNEL,
     (event, payload: unknown) => {
       const parsed = bbDesktopBrowserTabRefSchema.safeParse(payload);
-      if (
-        parsed.success &&
-        applicationWindowWebContentsIds.has(event.sender.id)
-      )
+      if (parsed.success && isPrivilegedAppSender(event))
         desktopBrowserBroker?.takeOver(event.sender.id, parsed.data.tabId);
     },
   );
@@ -2670,7 +2785,10 @@ async function runDesktopApp(): Promise<void> {
 
   const browserWindowCreator: DesktopBrowserWindowCreator = {
     create(options) {
-      return new BrowserWindow(options);
+      const window = new BrowserWindow(options);
+      // Install before the factory loads the first URL, so no window is ever unguarded.
+      installAppWindowNavigationGuard(window.webContents);
+      return window;
     },
   };
   logViewerPreloadPath = resolvedLogViewerPreloadPath;
@@ -2702,6 +2820,7 @@ async function runDesktopApp(): Promise<void> {
     openExternalUrl(openArgs) {
       if (/^(https?|mailto):/i.test(openArgs.url)) void shell.openExternal(openArgs.url);
     },
+    registerWindow: registerApplicationWindow,
     preloadPath,
     userDataPath,
   });
@@ -2709,12 +2828,9 @@ async function runDesktopApp(): Promise<void> {
 
   refreshApplicationMenu();
   await loadLoadingView();
-  const restoredWindows = await desktopWindowFactory.restoreSavedWindows({
+  await desktopWindowFactory.restoreSavedWindows({
     initialUrl: currentWindowUrl,
   });
-  for (const browserWindow of restoredWindows) {
-    registerApplicationWindow(browserWindow);
-  }
   if (serverTargetStore.getTarget().kind === "builtin") {
     await initializeRuntime({ bridgePath, serverUrl, userDataPath });
   } else {

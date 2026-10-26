@@ -231,6 +231,7 @@ export interface DispatchAttemptArgs {
   pluginSubmission: MessageDispatchHookContext["experimental_submission"];
   /** Retry provenance, when this attempt re-submits a failed turn. */
   retryOf?: TurnRequestRetryMarker;
+  beforeDispatch?: () => void;
   origin: ThreadCreateOrigin | null;
   originPluginId: string | null;
   startedOnBehalfOf: StartedOnBehalfOf | null;
@@ -504,6 +505,7 @@ async function runDispatchAttempt(
         claimed,
         payload: resolvedPayload,
         respectManualStopPause,
+        beforeDispatch: args.beforeDispatch,
         startContext: args.startContext ?? retryStartContext,
         thread,
       });
@@ -603,6 +605,7 @@ async function runDispatchAttempt(
       trigger: args.trigger,
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
       beforeAppendInTransaction: ({ tx }) => {
+        args.beforeDispatch?.();
         if (getThread(tx, thread.id)?.status !== thread.status) {
           throw new DispatchThreadStatusChangedError();
         }
@@ -682,6 +685,7 @@ interface AdmitPendingThreadArgs {
   claimed: ClaimedQueuedThreadMessageRow | null;
   payload: SendMessageRequest & { inputGroups?: PromptInput[][] };
   respectManualStopPause: boolean;
+  beforeDispatch: (() => void) | undefined;
   /** Creation's own record; null on a re-attempt, which reads it back. */
   startContext: PendingThreadStartContext | null;
   thread: Thread;
@@ -746,6 +750,7 @@ async function admitPendingThread(
         // flip that loses to a concurrent attempt rolls the consumption back,
         // so the row stays claimed for the caller to hand back rather than
         // being deleted under a message that never dispatched.
+        args.beforeDispatch?.();
         if (args.claimed !== null) {
           consumeClaimedRow(
             args.claimed,

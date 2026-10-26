@@ -1937,7 +1937,14 @@ export async function openPathInTargetWithRuntime(
   }
 
   const genericMacBundleId = parseMacApplicationTargetId(args.targetId);
-  if (genericMacBundleId !== null) {
+  const genericLocalAdapter =
+    genericMacBundleId !== null && args.context.kind === "local"
+      ? findLaunchAdapterByBundleId(genericMacBundleId)
+      : null;
+  if (
+    genericMacBundleId !== null &&
+    genericLocalAdapter?.kind !== "terminal"
+  ) {
     if (args.context.kind === "remote-ssh") {
       throw new WorkspaceOpenTargetError({
         code: "remote_target_unsupported",
@@ -1955,7 +1962,8 @@ export async function openPathInTargetWithRuntime(
     return;
   }
 
-  const definition = requireLaunchAdapter(args.targetId);
+  const definition =
+    genericLocalAdapter ?? requireLaunchAdapter(args.targetId);
   if (!(await isMacTargetAvailable(definition, runtime))) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",

@@ -474,6 +474,64 @@ function LockedTemplates({
   );
 }
 
+export interface LoopMenuItem<T extends string> {
+  id: T;
+  label: string;
+  icon: string;
+  count: number;
+  title?: string;
+  separated?: boolean;
+}
+
+export function LoopSideMenu<T extends string>({
+  label,
+  heading,
+  items,
+  value,
+  onChange,
+}: {
+  label: string;
+  heading: string;
+  items: readonly LoopMenuItem<T>[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <nav aria-label={label} className="sticky top-0 flex flex-col gap-0.5">
+      <div className="px-2.5 pb-1.5 text-2xs font-medium text-subtle-foreground">
+        {heading}
+      </div>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          title={item.title}
+          aria-pressed={value === item.id}
+          onClick={() => onChange(item.id)}
+          className={cn(
+            "flex h-8 cursor-pointer items-center gap-2 rounded-md px-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground",
+            value === item.id && "bg-state-hover text-foreground",
+            item.separated && "mt-3",
+          )}
+        >
+          <Icon
+            name={item.icon}
+            className={cn(
+              "size-3.5 shrink-0",
+              value === item.id && "text-primary",
+            )}
+            aria-hidden
+          />
+          <span className="min-w-0 truncate">{item.label}</span>
+          <span className="ml-auto text-2xs text-subtle-foreground">
+            {item.count}
+          </span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export function LoopTemplatesView({
   entries,
   cloudRows,
@@ -517,41 +575,24 @@ export function LoopTemplatesView({
 
   return (
     <div className="grid grid-cols-[10rem_minmax(0,1fr)] items-start gap-7">
-      <nav
-        aria-label="Template categories"
-        className="sticky top-0 flex flex-col gap-0.5"
-      >
-        <div className="px-2.5 pb-1.5 text-2xs font-medium text-subtle-foreground">
-          Categories
-        </div>
-        {[
-          { id: "all" as const, label: "All", icon: "GridView" },
-          ...TEMPLATE_CATEGORIES,
-        ].map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            aria-pressed={category === item.id}
-            onClick={() => setCategory(item.id)}
-            className={cn(
-              "flex h-8 cursor-pointer items-center gap-2 rounded-md px-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground",
-              category === item.id && "bg-state-hover text-foreground",
-            )}
-          >
-            <Icon
-              name={item.icon}
-              className={cn("size-3.5", category === item.id && "text-primary")}
-              aria-hidden
-            />
-            {item.label}
-            <span className="ml-auto text-2xs text-subtle-foreground">
-              {item.id === "all"
-                ? LOOP_TEMPLATES.length
-                : LOOP_TEMPLATES.filter((t) => t.category === item.id).length}
-            </span>
-          </button>
-        ))}
-      </nav>
+      <LoopSideMenu
+        label="Template categories"
+        heading="Categories"
+        value={category}
+        onChange={setCategory}
+        items={[
+          {
+            id: "all" as const,
+            label: "All",
+            icon: "GridView",
+            count: LOOP_TEMPLATES.length,
+          },
+          ...TEMPLATE_CATEGORIES.map((item) => ({
+            ...item,
+            count: LOOP_TEMPLATES.filter((t) => t.category === item.id).length,
+          })),
+        ]}
+      />
       <div className="-mt-6 min-w-0">
         {TEMPLATE_PRIORITIES.map((priority) => {
           const group = shown.filter((t) => t.priority === priority.level);

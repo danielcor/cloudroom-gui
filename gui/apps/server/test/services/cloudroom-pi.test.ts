@@ -80,11 +80,11 @@ it.each([false, true])("routes Pi through the core and replays messages without 
     expect(response.status, await response.clone().text()).toBe(201);
     const thread = await response.json();
     expect(JSON.parse(command(app.db, `first_${thread.id}`)!.input).provider).toBe(providerSelection ? selectedProvider : undefined);
-    await expect.poll(() => getThread(app.db, thread.id)?.status).toBe("starting");
+    await expect.poll(() => getThread(app.db, thread.id)?.status).toBe("active");
     await runThreadLifecycleSweep(app.deps);
-    expect(getThread(app.db, thread.id)?.status).toBe("starting");
+    expect(getThread(app.db, thread.id)?.status).toBe("active");
     await advanceThreadProvisioning(app.deps, { threadId: thread.id });
-    expect(getThread(app.db, thread.id)?.status).toBe("starting");
+    expect(getThread(app.db, thread.id)?.status).toBe("active");
     expect(app.db.select().from(events).all().filter(e => e.type === "system/error")).toEqual([]);
     finishStartup();
     await expect.poll(() => getThread(app.db, thread.id)?.status).toBe("idle");

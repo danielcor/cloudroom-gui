@@ -704,6 +704,7 @@ it("keeps each queued follow-up's reasoning and rejects locked or conflicting ch
     prompts.push(body);
     const receipt = { request_id: body.request_id, command: "prompt", state: "accepted", input: { text: body.text, ...(body.reasoning ? { reasoning: body.reasoning } : {}) } };
     record("receipt", receipt);
+    if (body.request_id.startsWith("first_")) { record("state", { state: "starting_turn", request_id: body.request_id }); record("receipt", { ...receipt, state: "completed" }); record("state", { state: "idle" }); }
     json({ session_id: sid, receipt, saving: {} }, 202);
   });
   core.listen(0, "127.0.0.1"); await once(core, "listening");
@@ -791,6 +792,7 @@ it("shows a Cloud follow-up in the chat at once, like Local, and queues the next
     prompts.push(body.request_id);
     const receipt = { request_id: body.request_id, command: "prompt", state: "accepted", input: { text: body.text } };
     record("receipt", receipt);
+    if (body.request_id.startsWith("first_")) { record("state", { state: "starting_turn", request_id: body.request_id }); record("receipt", { ...receipt, state: "completed" }); record("state", { state: "idle" }); }
     json({ session_id: "cr_smooth", receipt, saving: {} }, 202);
   });
   core.listen(0, "127.0.0.1"); await once(core, "listening");
@@ -858,6 +860,7 @@ it("credits Claude usage that arrives after a follow-up was sent to the turn tha
     }
     const receipt = { request_id: body.request_id, command: "prompt", state: "accepted", input: { text: body.text } };
     record("receipt", receipt);
+    if (body.request_id.startsWith("first_")) { record("state", { state: "starting_turn", request_id: body.request_id }); record("receipt", { ...receipt, state: "completed" }); record("state", { state: "idle" }); }
     json({ session_id: "cr_usage", receipt, saving: {} }, 202);
   });
   core.listen(0, "127.0.0.1"); await once(core, "listening");

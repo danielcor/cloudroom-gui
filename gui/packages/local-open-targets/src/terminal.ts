@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { WorkspaceOpenTargetError } from "./errors.js";
 import type {
   BuildMacLocalTerminalOpenArgs,
   BuildMacRemoteSshOpenArgs,
@@ -21,6 +22,18 @@ function quoteShellArg(value: string): string {
 
 function escapeAppleScriptString(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+const TERMINAL_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
+
+function assertTerminalCommandSafe(command: string): void {
+  if (TERMINAL_CONTROL_CHARACTER_PATTERN.test(command)) {
+    throw new WorkspaceOpenTargetError({
+      code: "path_not_openable",
+      message:
+        "This path can't be opened in a terminal because it contains control characters.",
+    });
+  }
 }
 
 function buildTerminalShellScript(args: TerminalShellScriptArgs): string {
@@ -191,7 +204,9 @@ function buildShellCommand(args: string[]): string {
 export function buildMacTerminalLocalOpenArgs(
   args: BuildMacLocalTerminalOpenArgs & { appName: "Terminal" | "iTerm" },
 ): string[] {
-  const command = escapeAppleScriptString(buildMacTerminalLocalCommand(args));
+  const rawCommand = buildMacTerminalLocalCommand(args);
+  assertTerminalCommandSafe(rawCommand);
+  const command = escapeAppleScriptString(rawCommand);
 
   if (args.appName === "Terminal") {
     return [
@@ -225,9 +240,9 @@ export function buildMacTerminalAppLocalOpenArgs(
 export function buildMacTerminalRemoteSshOpenArgs(
   args: BuildMacRemoteSshOpenArgs & { appName: "Terminal" | "iTerm" },
 ): string[] {
-  const command = escapeAppleScriptString(
-    buildShellCommand(buildRemoteTerminalSshArgs(args)),
-  );
+  const rawCommand = buildShellCommand(buildRemoteTerminalSshArgs(args));
+  assertTerminalCommandSafe(rawCommand);
+  const command = escapeAppleScriptString(rawCommand);
 
   if (args.appName === "Terminal") {
     return [

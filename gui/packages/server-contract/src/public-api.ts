@@ -1329,7 +1329,7 @@ export const publicApiRoutes = {
       path: "/threads/:id/stop",
       method: "post",
       request: noRequest<PathId>(),
-      response: jsonResponse<{ ok: true }>(),
+      response: jsonResponse<{ ok: true; cancelledRetries: number }>(),
     }),
     compact: defineRoute({
       path: "/threads/:id/compact",

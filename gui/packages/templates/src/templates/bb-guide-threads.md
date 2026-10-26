@@ -419,7 +419,8 @@ Lifecycle:
   provider's conversation) is continued with a nudge rather than asked twice.
   With no --turn it retries the most recent turn, the
   one whose failure put the thread in error; --turn asserts which turn you mean
-  and fails when the thread has moved on, as does retrying a thread that has not
+  and fails when the thread has moved on or was stopped since that turn failed
+  (until the server restarts), as does retrying a thread that has not
   failed or a turn that already has a retry queued. Without --send-at the retry
   is attempted now, and may still queue behind a busy thread or a plugin.
 
@@ -431,7 +432,8 @@ Lifecycle:
   The command succeeds when no runtime is loaded. Archive a finished hidden
   worker first, then stop it to release memory promptly. A stop that only
   releases an idle runtime adds no interruption: it leaves the timeline and any
-  pending interaction of that thread untouched.
+  pending interaction of that thread untouched. It also cancels the thread's
+  pending automatic retries and says so.
 
   room-cli thread unarchive [id]                 Unarchive a thread
     --self                                 Unarchive current thread

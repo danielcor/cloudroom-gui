@@ -208,24 +208,49 @@ function parseLimit(args: ParsedArgs, fallback: number): number {
   return limit;
 }
 
-/** `create --template ID`: the template fills every setting the flags leave out, like the Templates tab. */
-function applyTemplate(args: ParsedArgs): void {
+/** Templates are for paid plans, like the Templates tab; unknown plans (signed out, billing off) stay open. */
+async function requireTemplatesPlan(bb: Pick<BbPluginApi, "sdk">): Promise<void> {
+  const status = await bb.sdk.cloudroom.status().catch(() => null);
+  if (status?.plan === "free") {
+    throw new Error("Loop templates need a paid plan. Upgrade at https://www.cloudroom.dev/billing");
+  }
+}
+
+/** `create --template ID`: the template fills every setting the flags leave out, like the Templates tab: a Cloud loop
+ *  unless --local, and the template's agent when it is set up here, else the project's default agent. */
+async function applyTemplate(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs): Promise<void> {
   if (!args.flags.has("template")) return;
   const id = requireFlag(args, "template");
   const template = LOOP_TEMPLATES.find((candidate) => candidate.id === id);
   if (!template) {
     throw new Error(`Unknown template '${id}'. Run room-cli loop templates.`);
   }
+  await requireTemplatesPlan(bb);
+  if (args.flags.has("cloud") && args.flags.has("local")) {
+    throw new Error("Use --cloud or --local, not both.");
+  }
+  const local = args.flags.has("local");
+  if (!local) args.flags.set("cloud", true);
+  const projectId = requireFlag(args, "project");
+  const [providers, defaults] = await Promise.all([
+    bb.sdk.providers.list().catch(() => []),
+    bb.sdk.projects.defaultExecutionOptions({ projectId }).catch(() => null),
+  ]);
+  const ownAgent = providers.some(
+    (provider) => provider.id === template.providerId && provider.available,
+  );
+  const agent = ownAgent || defaults === null ? template : defaults;
   const scheduled = ["cron", "at", "in", "webhook"].some((name) =>
     args.flags.has(name),
   );
-  const defaults: Record<string, string> = {
+  const filled: Record<string, string> = {
     name: template.name,
     prompt: template.prompt,
-    provider: template.providerId,
-    model: template.model,
-    reasoning: template.reasoningLevel,
+    provider: agent.providerId,
+    model: agent.model,
+    reasoning: agent.reasoningLevel,
     priority: String(template.priority),
+    ...(local ? { "permission-mode": defaults?.permissionMode ?? "auto" } : {}),
     ...(scheduled
       ? {}
       : {
@@ -233,7 +258,7 @@ function applyTemplate(args: ParsedArgs): void {
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
   };
-  for (const [name, value] of Object.entries(defaults)) {
+  for (const [name, value] of Object.entries(filled)) {
     if (!args.flags.has(name)) args.flags.set(name, value);
   }
 }
@@ -959,8 +984,8 @@ function helpText(): string {
 
 room-cli loop list --project <id>          Also lists the Cloud loops whose thread is in that project
 room-cli loop create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] [--permission-mode accept-edits|auto|full] | --script <inline> | --script-file <path> [--host <name-or-id>]) [--priority 1-4]
-room-cli loop create --template <id> --project <id> [--cloud] [any flag above]   The template fills in the rest
-room-cli loop templates                    Ready-made loops, with their priority, schedule, and agent
+room-cli loop create --template <id> --project <id> [--local] [any flag above]   A Cloud loop unless --local; the template fills in the rest (paid plans)
+room-cli loop templates                    Ready-made loops, with their priority, schedule, and agent (paid plans)
 room-cli loop show <loopId> --project <id>
 room-cli loop update <loopId> --project <id> [--name <name>] [--priority 1-4] [schedule flags] [--prompt <text>] [--provider <id>] [--model <model>] [--reasoning <level>] [--service-tier default|fast|none] [--permission-mode accept-edits|auto|full] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] [--script <inline> | --script-file <path>] [--interpreter <name>] [--timeout <ms>] [--env-json <json>] (omitted settings are kept; switching between agent and script replaces them)
 room-cli loop pause <loopId> --project <id>
@@ -987,7 +1012,7 @@ A --webhook loop, Local or Cloud, runs when its secret URL gets a POST: create p
 the requests that arrived as data. Cloud runs start within seconds; this Mac checks for Local ones about once a minute,
 and they wait while it is off. A Local webhook loop an agent creates starts paused: a person turns it on in Loops.
 room-cli loop create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) [--new-thread | --same-thread] [--script <inline> | --script-file <path>] [--provider <id>] [--model <model>] [--reasoning <level>] [--priority 1-4]
-room-cli loop create --cloud --template <id> --project <id>   Runs from the project's newest Cloud thread, else a new one
+A Cloud template loop runs from the project's newest Cloud thread, else a new one titled "<template> loop".
 room-cli loop list --cloud [--thread <cloudThreadId>]   All Cloud loops, in every project
 room-cli loop show|pause|resume|run|hook <cloudLoopId>
 room-cli loop runs <cloudLoopId> [--limit <count>]   What each run did, from its loop report
@@ -1218,7 +1243,7 @@ export function registerAutomationCli(args: {
         name: "create",
         summary: "Create a loop, or add one from a template",
         usage:
-          "room-cli loop create --project <id> --name <name> [schedule flags] [mode flags] [--priority 1-4] | room-cli loop create --template <id> --project <id> [--cloud]",
+          "room-cli loop create --project <id> --name <name> [schedule flags] [mode flags] [--priority 1-4] | room-cli loop create --template <id> --project <id> [--local]",
       },
       {
         name: "templates",
@@ -1295,10 +1320,11 @@ export function registerAutomationCli(args: {
           return { exitCode: 0, stdout: helpText() };
         }
         if (command === "templates") {
+          await requireTemplatesPlan(bb);
           return { exitCode: 0, stdout: optionalJson(parsed, LOOP_TEMPLATES) ?? printTemplates() };
         }
         if (command === "settings") return await runSettingsCommand(bb, parsed);
-        if (command === "create") applyTemplate(parsed);
+        if (command === "create") await applyTemplate(bb, parsed);
         if (isCloudCommand(parsed)) return await runCloudCommand(bb, parsed, ctx);
         if (command === "review") return await runReviewCommand(service, parsed);
         if (command === "report") return await runReportCommand(service, argv, parsed, ctx);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Switch } from "@cloudroom/shared-ui/switch";
@@ -88,6 +88,11 @@ export async function replaceWebhookUrl(
   }
 }
 
+const lastLoaded: {
+  rows: CloudAutomation[] | null;
+  stopAtLimit: boolean | null;
+} = { rows: null, stopAtLimit: null };
+
 export function useCloudAutomations(): {
   rows: CloudAutomation[];
   loaded: boolean;
@@ -96,9 +101,9 @@ export function useCloudAutomations(): {
 } {
   const rpc = useRpc<typeof automationRpcContract>();
   const navigate = useBbNavigate();
-  const [rows, setRows] = useState<CloudAutomation[]>([]);
+  const [rows, setRows] = useState(() => lastLoaded.rows ?? []);
   // True once the last list request succeeded, so an empty list means no Cloud loops.
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => lastLoaded.rows !== null);
   const call = useCallback(
     (request: Request) => rpc.call("cloud_automations", request),
     [rpc],
@@ -107,12 +112,13 @@ export function useCloudAutomations(): {
     () =>
       call({ action: "list" }).then(
         (value) => {
-          setRows(
-            (value as { automations?: CloudAutomation[] }).automations ?? [],
-          );
+          lastLoaded.rows =
+            (value as { automations?: CloudAutomation[] }).automations ?? [];
+          setRows(lastLoaded.rows);
           setLoaded(true);
         },
         () => {
+          lastLoaded.rows = null;
           setRows([]);
           setLoaded(false);
         },
@@ -184,18 +190,28 @@ export type LimitSetting = { stop_at_limit: boolean };
 
 export function LoopLimitSwitch() {
   const rpc = useRpc<typeof automationRpcContract>();
-  const [stop, setStop] = useState<boolean | null>(null);
+  const [stop, setStop] = useState(lastLoaded.stopAtLimit);
   const [saving, setSaving] = useState(false);
+  const changedRef = useRef(false);
   useEffect(() => {
     const request: Request = { action: "settings" };
     rpc.call("cloud_automations", request).then(
-      (value) => setStop((value as LimitSetting).stop_at_limit),
-      () => setStop(null),
+      (value) => {
+        if (changedRef.current) return;
+        lastLoaded.stopAtLimit = (value as LimitSetting).stop_at_limit;
+        setStop(lastLoaded.stopAtLimit);
+      },
+      () => {
+        if (changedRef.current) return;
+        lastLoaded.stopAtLimit = null;
+        setStop(null);
+      },
     );
   }, [rpc]);
   const change = useCallback(
     async (next: boolean) => {
       if (saving) return;
+      changedRef.current = true;
       const previous = stop;
       setSaving(true);
       setStop(next);
@@ -205,6 +221,7 @@ export function LoopLimitSwitch() {
           "cloud_automations",
           request,
         )) as LimitSetting;
+        lastLoaded.stopAtLimit = saved.stop_at_limit;
         setStop(saved.stop_at_limit);
       } catch (error: unknown) {
         setStop(previous);

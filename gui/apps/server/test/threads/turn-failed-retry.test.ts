@@ -1,6 +1,7 @@
 import {
   claimQueuedThreadMessage,
   getLatestThreadSequence,
+  getQueuedThreadMessage,
   getThread,
   listEvents,
   listQueuedThreadMessages,
@@ -20,6 +21,11 @@ import { runQueuedMessageDispatch } from "../../src/services/threads/queued-mess
 import { toThreadQueuedMessage } from "../../src/services/threads/thread-queued-messages.js";
 import { buildTurnFailedEvent } from "../../src/services/threads/turn-failed.js";
 import { retryFailedTurn } from "../../src/services/threads/turn-retry.js";
+import {
+  reportQueuedCommandSuccess,
+  waitForQueuedCommand,
+} from "../helpers/commands.js";
+import { readJson } from "../helpers/json.js";
 import {
   seedEnvironment,
   seedEvent,
@@ -694,6 +700,133 @@ describe("retrying a failed turn", () => {
       });
       expect(requeued.sendAt).toBeNull();
       expect(requeued.payload.kind).toBe("retry");
+    });
+  });
+
+  it("is cancelled by a user stop, even when claimed, due, or being scheduled while the stop runs", async () => {
+    await withTestHarness(async (harness) => {
+      const queueRetry = async (hostId: string) => {
+        const { thread } = seedFailableThread(harness, hostId);
+        failThread(harness, thread.id);
+        await retryFailedTurn(harness.deps, {
+          thread: requireThread(harness, thread.id),
+          request: {
+            turnRequestId: null,
+            sendAt: Date.now() + 60_000,
+            reason: "Rate limited",
+          },
+        });
+        return {
+          threadId: thread.id,
+          retryId: onlyQueuedRow(harness, thread.id).id,
+        };
+      };
+      const stop = async (
+        threadId: string,
+        whileStopping: () => Promise<void>,
+      ) => {
+        const response = harness.app.request(
+          `/api/v1/threads/${threadId}/stop`,
+          { method: "POST" },
+        );
+        const command = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            command.type === "thread.stop" && command.threadId === threadId,
+        );
+        await whileStopping();
+        await reportQueuedCommandSuccess(harness, command, {
+          providerCheckpointId: null,
+        });
+        return readJson(await response);
+      };
+
+      const due = await queueRetry("host-stop-due");
+      await expect(
+        stop(due.threadId, () => sweepPastResume(harness)),
+      ).resolves.toEqual({ ok: true, cancelledRetries: 1 });
+      expect(getQueuedThreadMessage(harness.db, due.retryId)).toBeNull();
+      expect(turnRequests(harness, due.threadId)).toHaveLength(1);
+
+      const draining = await queueRetry("host-stop-draining");
+      const scheduled = seedFailableThread(harness, "host-stop-scheduled");
+      const immediate = seedFailableThread(harness, "host-stop-immediate");
+      failThread(harness, scheduled.thread.id);
+      failThread(harness, immediate.thread.id);
+      let hookEntered = () => {};
+      const entered = new Promise<void>((resolve) => {
+        hookEntered = resolve;
+      });
+      let releaseHook = () => {};
+      const hookGate = new Promise<void>((resolve) => {
+        releaseHook = resolve;
+      });
+      installHooks({
+        "message.dispatch": [
+          {
+            pluginId: "slow-policy",
+            handler: async () => {
+              hookEntered();
+              await hookGate;
+              return { action: "proceed" };
+            },
+          },
+        ],
+      });
+      const sweeping = sweepPastResume(harness);
+      await entered;
+      const automaticRetry = (
+        seeded: ReturnType<typeof seedFailableThread>,
+        sendAt: number | null,
+      ) =>
+        retryFailedTurn(harness.deps, {
+          thread: requireThread(harness, seeded.thread.id),
+          request: {
+            turnRequestId: seeded.requestId,
+            sendAt,
+            reason: "Rate limited",
+          },
+        });
+      const inFlight = [
+        automaticRetry(scheduled, Date.now() + 60_000),
+        automaticRetry(immediate, null),
+      ].map((retry) =>
+        expect(retry).rejects.toMatchObject({
+          body: { code: "no_failed_turn" },
+        }),
+      );
+      await expect(stop(draining.threadId, async () => {})).resolves.toEqual({
+        ok: true,
+        cancelledRetries: 1,
+      });
+      for (const seeded of [scheduled, immediate]) {
+        await expect(stop(seeded.thread.id, async () => {})).resolves.toEqual({
+          ok: true,
+          cancelledRetries: 0,
+        });
+      }
+      releaseHook();
+      await sweeping;
+      await Promise.all(inFlight);
+      await expect(
+        automaticRetry(scheduled, Date.now() + 60_000),
+      ).rejects.toMatchObject({ body: { code: "no_failed_turn" } });
+      await sweepPastResume(harness);
+      expect(getQueuedThreadMessage(harness.db, draining.retryId)).toBeNull();
+      for (const threadId of [
+        draining.threadId,
+        scheduled.thread.id,
+        immediate.thread.id,
+      ]) {
+        expect(listQueuedThreadMessages(harness.db, threadId)).toEqual([]);
+        expect(turnRequests(harness, threadId)).toHaveLength(1);
+      }
+      await expect(
+        retryFailedTurn(harness.deps, {
+          thread: requireThread(harness, scheduled.thread.id),
+          request: { turnRequestId: null, sendAt: null, reason: "Retry" },
+        }),
+      ).resolves.toMatchObject({ delivery: "sent" });
     });
   });
 

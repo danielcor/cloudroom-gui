@@ -2125,6 +2125,255 @@ describe("workspace open targets", () => {
     }
   });
 
+  it.each([
+    { label: "Ctrl-U kill-line", control: "\u0015" },
+    { label: "carriage return", control: "\r" },
+    { label: "newline", control: "\n" },
+    { label: "escape", control: "\u001b" },
+    { label: "delete", control: "\u007f" },
+    { label: "C1 next-line", control: "\u0085" },
+  ])(
+    "refuses to open a local directory in Terminal when its name contains a $label control character",
+    async ({ control }) => {
+      const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+      const targetPath = path.join(workspacePath, `repo${control}evil`);
+      const calls: ExecFileCall[] = [];
+      const execFile = createAvailableExecFile({ calls });
+
+      try {
+        await mkdir(targetPath, { recursive: true });
+
+        await expect(
+          openPathInTargetWithRuntime(
+            {
+              context: { kind: "local" },
+              columnNumber: null,
+              lineNumber: null,
+              path: targetPath,
+              targetId: "terminal",
+            },
+            createRuntime({ execFile }),
+          ),
+        ).rejects.toMatchObject({ code: "path_not_openable" });
+
+        expect(calls.some((call) => call.file === "osascript")).toBe(false);
+      } finally {
+        await rm(workspacePath, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("refuses to open a local directory in iTerm2 when its name contains a control character", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const targetPath = path.join(workspacePath, "repo\u0015evil");
+    const calls: ExecFileCall[] = [];
+    const execFile = createAvailableExecFile({
+      availableBundleIdSubstrings: ["com.googlecode.iterm2"],
+      calls,
+    });
+
+    try {
+      await mkdir(targetPath, { recursive: true });
+
+      await expect(
+        openPathInTargetWithRuntime(
+          {
+            context: { kind: "local" },
+            columnNumber: null,
+            lineNumber: null,
+            path: targetPath,
+            targetId: "iterm2",
+          },
+          createRuntime({ execFile }),
+        ),
+      ).rejects.toMatchObject({ code: "path_not_openable" });
+
+      expect(calls.some((call) => call.file === "osascript")).toBe(false);
+    } finally {
+      await rm(workspacePath, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to open a local file in Terminal when its name contains a control character and an editor is available", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const filePath = path.join(workspacePath, "notes\u0015evil.txt");
+    const calls: ExecFileCall[] = [];
+    const execFile = createAvailableExecFile({
+      availableExecutables: ["vim"],
+      calls,
+    });
+
+    try {
+      await writeFile(filePath, "hi\n");
+
+      await expect(
+        openPathInTargetWithRuntime(
+          {
+            context: { kind: "local" },
+            columnNumber: null,
+            lineNumber: null,
+            path: filePath,
+            targetId: "terminal",
+          },
+          createRuntime({ execFile }),
+        ),
+      ).rejects.toMatchObject({ code: "path_not_openable" });
+
+      expect(calls.some((call) => call.file === "osascript")).toBe(false);
+    } finally {
+      await rm(workspacePath, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to open a remote SSH path in iTerm2 when the path contains a control character", async () => {
+    const calls: ExecFileCall[] = [];
+    const execFile = createAvailableExecFile({
+      availableBundleIdSubstrings: ["com.googlecode.iterm2"],
+      availableExecutables: ["osascript", "ssh"],
+      calls,
+    });
+
+    await expect(
+      openPathInTargetWithRuntime(
+        {
+          context: { kind: "remote-ssh", sshAuthority: "devbox" },
+          columnNumber: null,
+          lineNumber: null,
+          path: "/home/me/repo\u0015evil",
+          targetId: "iterm2",
+        },
+        createRuntime({ execFile }),
+      ),
+    ).rejects.toMatchObject({ code: "path_not_openable" });
+
+    expect(calls.some((call) => call.file === "osascript")).toBe(false);
+  });
+
+  it("refuses a generic mac-app terminal bundle id when the path contains a control character", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const targetPath = path.join(workspacePath, "repo\u0015evil");
+    const calls: ExecFileCall[] = [];
+    const execFile = createAvailableExecFile({
+      availableBundleIdSubstrings: ["com.googlecode.iterm2"],
+      calls,
+    });
+
+    try {
+      await mkdir(targetPath, { recursive: true });
+
+      await expect(
+        openPathInTargetWithRuntime(
+          {
+            context: { kind: "local" },
+            columnNumber: null,
+            lineNumber: null,
+            path: targetPath,
+            targetId: "mac-app:com.googlecode.iterm2",
+          },
+          createRuntime({ execFile }),
+        ),
+      ).rejects.toMatchObject({ code: "path_not_openable" });
+
+      expect(calls.some((call) => call.file === "osascript")).toBe(false);
+      expect(
+        calls.some(
+          (call) => call.file === "open" && call.args.includes("-b"),
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(workspacePath, { force: true, recursive: true });
+    }
+  });
+
+  it("routes a generic mac-app terminal bundle id through the guarded terminal adapter", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const calls: ExecFileCall[] = [];
+    const execFile = createAvailableExecFile({
+      availableBundleIdSubstrings: ["com.googlecode.iterm2"],
+      calls,
+    });
+
+    try {
+      await openPathInTargetWithRuntime(
+        {
+          context: { kind: "local" },
+          columnNumber: null,
+          lineNumber: null,
+          path: workspacePath,
+          targetId: "mac-app:com.googlecode.iterm2",
+        },
+        createRuntime({ execFile }),
+      );
+
+      const osascriptCall = calls.find((call) => call.file === "osascript");
+      expect(osascriptCall).toBeDefined();
+      const script = osascriptCall?.args.join("\n") ?? "";
+      expect(script).toContain(
+        'tell application "iTerm" to tell current session of current window to write text',
+      );
+      expect(script).toContain(`cd '${workspacePath}'`);
+      expect(
+        calls.some(
+          (call) => call.file === "open" && call.args.includes("-b"),
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(workspacePath, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses a remote SSH open when the SSH authority contains a control character", async () => {
+    const calls: ExecFileCall[] = [];
+    const execFile = createAvailableExecFile({
+      availableExecutables: ["osascript", "ssh"],
+      calls,
+    });
+
+    await expect(
+      openPathInTargetWithRuntime(
+        {
+          context: { kind: "remote-ssh", sshAuthority: "dev\u0015box" },
+          columnNumber: null,
+          lineNumber: null,
+          path: "/home/me/project",
+          targetId: "terminal",
+        },
+        createRuntime({ execFile }),
+      ),
+    ).rejects.toMatchObject({ code: "path_not_openable" });
+
+    expect(calls.some((call) => call.file === "osascript")).toBe(false);
+  });
+
+  it("opens a local directory with a non-ASCII unicode name in Terminal", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const targetPath = path.join(workspacePath, "café-日本語");
+    const calls: ExecFileCall[] = [];
+    const execFile = createAvailableExecFile({ calls });
+
+    try {
+      await mkdir(targetPath, { recursive: true });
+
+      await openPathInTargetWithRuntime(
+        {
+          context: { kind: "local" },
+          columnNumber: null,
+          lineNumber: null,
+          path: targetPath,
+          targetId: "terminal",
+        },
+        createRuntime({ execFile }),
+      );
+
+      const osascriptCall = calls.find((call) => call.file === "osascript");
+      expect(osascriptCall).toBeDefined();
+      const script = osascriptCall?.args.join("\n") ?? "";
+      expect(script).toContain(`cd '${targetPath}'`);
+    } finally {
+      await rm(workspacePath, { force: true, recursive: true });
+    }
+  });
+
   it("inserts terminal editor location args before explicit editor args separator", async () => {
     const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
     const filePath = path.join(workspacePath, "src", "file.ts");

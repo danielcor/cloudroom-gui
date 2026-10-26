@@ -85,6 +85,9 @@ interface CreateDesktopWindowFactoryArgs {
   isLinuxFrameless: boolean;
   isQuitting(): boolean;
   openExternalUrl(args: OpenExternalUrlArgs): void;
+  // Called once per window right after creation and before its first load, so identity and IPC
+  // guards are in place before the renderer can send anything.
+  registerWindow?(browserWindow: DesktopBrowserWindow): void;
   preloadPath: string;
   userDataPath: string;
 }
@@ -273,6 +276,7 @@ export function createDesktopWindowFactory(
       browserWindow.webContents.session.setSpellCheckerEnabled(true);
 
       activeWindows.set(stateKey, browserWindow);
+      args.registerWindow?.(browserWindow);
 
       if (restoredState.isMaximized) {
         browserWindow.maximize();

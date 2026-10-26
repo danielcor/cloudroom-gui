@@ -81,7 +81,7 @@ afterEach(() => {
 });
 
 describe("SettingsSidebarContent navigation", () => {
-  it("shows one flat row per group, with Advanced last", () => {
+  it("shows one flat row per group", () => {
     renderSidebar();
     expect(rowLabels()).toEqual([
       "General",
@@ -94,14 +94,10 @@ describe("SettingsSidebarContent navigation", () => {
       "Keyboard",
       "Plugins",
       "Updates",
-      "Advanced",
     ]);
     expect(
       screen.getByRole("link", { name: "Instructions" }).getAttribute("href"),
     ).toBe("/settings/plugins/custom-instructions");
-    expect(
-      screen.getByRole("link", { name: "Advanced" }).getAttribute("href"),
-    ).toBe("/settings/command-guard");
   });
 
   it("puts every built-in settings page in exactly one group", () => {
@@ -123,7 +119,10 @@ describe("SettingsSidebarContent navigation", () => {
     expect(currentRow()).toEqual(["Agents"]);
     cleanup();
     renderSidebar({ activeSection: "command-guard" });
-    expect(currentRow()).toEqual(["Advanced"]);
+    expect(currentRow()).toEqual(["Agents"]);
+    cleanup();
+    renderSidebar({ activeSection: "experiments" });
+    expect(currentRow()).toEqual(["Updates"]);
   });
 
   it("files plugins without a group under Plugins", () => {

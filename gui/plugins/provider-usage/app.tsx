@@ -54,6 +54,12 @@ import {
   usageFeedbackMessages,
 } from "./usage-feedback.js";
 
+import {
+  loadPlanSummary,
+  planMeterLeft,
+  planMeterPercent,
+  type PlanSummary,
+} from "./plan-usage.js";
 import { UsageSettings } from "./settings.js";
 
 export interface UsageStoreSnapshot {
@@ -73,6 +79,7 @@ let storeSnapshot: UsageStoreSnapshot = {
 };
 let activeRefreshCount = 0;
 let lastMachineId: string | null = null;
+let lastPlan: PlanSummary | null = null;
 
 function updateStore(next: UsageStoreSnapshot): void {
   storeSnapshot = next;
@@ -199,6 +206,79 @@ function UsageBlocks({ usedPercent }: { usedPercent: number }) {
   );
 }
 
+function UsageLine({
+  last,
+  label,
+  usedPercent,
+  detail,
+}: {
+  last: boolean;
+  label: string;
+  usedPercent: number;
+  detail: string;
+}) {
+  return (
+    <span className="flex items-center gap-[7px] whitespace-nowrap">
+      <span aria-hidden="true" className="text-subtle-foreground">
+        {last ? "└" : "├"}
+      </span>
+      <span className="w-11 shrink-0 truncate lowercase text-muted-foreground">
+        {label}
+      </span>
+      <UsageBlocks usedPercent={usedPercent} />
+      <span
+        className={cn(
+          "w-[30px] shrink-0 text-right tabular-nums",
+          usageTextColorClass(usedPercent),
+        )}
+      >
+        {Math.round(usedPercent)}%
+      </span>
+      <span
+        aria-hidden="true"
+        className="min-w-0 truncate tabular-nums text-subtle-foreground"
+      >
+        {detail}
+      </span>
+    </span>
+  );
+}
+
+function PlanUsage({ plan }: { plan: PlanSummary }) {
+  return (
+    <section
+      aria-label="Cloudroom plan"
+      className="border-b border-dashed border-sidebar-border pb-1.5"
+    >
+      <h2 className="flex min-w-0 items-center gap-2 font-normal">
+        <Icon name="Cloud" aria-hidden="true" className="size-3 shrink-0" />
+        <span className="shrink-0 lowercase text-primary-text">cloudroom</span>
+        <span className="min-w-0 truncate text-subtle-foreground">
+          {plan.plan}
+        </span>
+      </h2>
+      {plan.meters.map((meter, index) => (
+        <p
+          key={meter.label}
+          title={`${meter.used.toLocaleString("en-US")} of ${meter.limit.toLocaleString("en-US")} ${meter.label} used, ${plan.period}`}
+        >
+          <span aria-hidden="true">
+            <UsageLine
+              last={index === plan.meters.length - 1}
+              label={meter.label}
+              usedPercent={planMeterPercent(meter)}
+              detail={planMeterLeft(meter)}
+            />
+          </span>
+          <span className="sr-only">
+            {`${meter.label}: ${Math.round(planMeterPercent(meter))}% used, ${planMeterLeft(meter)}`}
+          </span>
+        </p>
+      ))}
+    </section>
+  );
+}
+
 function UsageWindow({
   window,
   last,
@@ -230,29 +310,12 @@ function UsageWindow({
       aria-expanded={showReset}
       onClick={() => setShowReset((shown) => !shown)}
     >
-      <span className="flex items-center gap-[7px] whitespace-nowrap">
-        <span aria-hidden="true" className="text-subtle-foreground">
-          {last ? "└" : "├"}
-        </span>
-        <span className="w-11 shrink-0 truncate lowercase text-muted-foreground">
-          {label}
-        </span>
-        <UsageBlocks usedPercent={window.usedPercent} />
-        <span
-          className={cn(
-            "w-[30px] shrink-0 text-right tabular-nums",
-            usageTextColorClass(window.usedPercent),
-          )}
-        >
-          {Math.round(window.usedPercent)}%
-        </span>
-        <span
-          aria-hidden="true"
-          className="min-w-0 truncate tabular-nums text-subtle-foreground"
-        >
-          {countdown ?? "—"}
-        </span>
-      </span>
+      <UsageLine
+        last={last}
+        label={label}
+        usedPercent={window.usedPercent}
+        detail={countdown ?? "—"}
+      />
       {showReset ? (
         <span className="block whitespace-normal pl-3.5 text-subtle-foreground">
           {reset ?? "Reset time not reported."}
@@ -581,14 +644,50 @@ function TimeInCloudroom() {
   );
 }
 
+const PLAN_RETRY_MS = 10_000;
+
+function usePlanSummary(): [PlanSummary | null, () => void] {
+  const [plan, setPlan] = useState(lastPlan);
+  const [reloads, setReloads] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | null = null;
+    const load = () => {
+      const next = (summary: PlanSummary | null) => {
+        if (controller.signal.aborted) return;
+        timer = window.setTimeout(load, summary === null ? PLAN_RETRY_MS : CARD_MAX_AGE_MS);
+      };
+      if (document.visibilityState === "hidden") return next(lastPlan);
+      loadPlanSummary(controller.signal).then(
+        (summary) => {
+          lastPlan = summary;
+          setPlan(summary);
+          next(summary);
+        },
+        () => next(null),
+      );
+    };
+    load();
+    return () => {
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [reloads]);
+  return [plan, useCallback(() => setReloads((count) => count + 1), [])];
+}
+
 export function ProviderUsageStatusContent({
   dismiss,
   snapshot,
   threadMachineId,
+  plan = null,
+  reloadPlan,
   refreshEnabled = true,
 }: ExperimentalSidebarFooterDisclosureProps & {
   snapshot: UsageStoreSnapshot;
   threadMachineId: string | null;
+  plan?: PlanSummary | null;
+  reloadPlan?: () => void;
   refreshEnabled?: boolean;
 }) {
   const [, refreshCountdowns] = useState(0);
@@ -691,13 +790,14 @@ export function ProviderUsageStatusContent({
           aria-label="Reload provider usage"
           disabled={snapshot.isRefreshing}
           className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50"
-          onClick={() =>
+          onClick={() => {
+            reloadPlan?.();
             void refreshUsage({
               force: true,
               machineIds: activeMachineId === null ? null : [activeMachineId],
               maxAgeMs: 0,
-            })
-          }
+            });
+          }}
         >
           <Icon
             name="RotateCcw"
@@ -717,6 +817,9 @@ export function ProviderUsageStatusContent({
         </button>
       </div>
       <div className="min-h-0 space-y-1.5 overflow-y-auto px-[11px] pb-2.5 pt-1.5 font-mono text-[10.5px] leading-[1.75]">
+        {plan === null || plan.meters.length === 0 ? null : (
+          <PlanUsage plan={plan} />
+        )}
         {feedback === null ? null : (
           <UsageFeedback
             message={feedback}
@@ -811,11 +914,14 @@ function ProviderUsageStatus(props: ExperimentalSidebarFooterDisclosureProps) {
         ?.id ?? null,
     [sidebarThreads.threads, threadId],
   );
+  const [plan, reloadPlan] = usePlanSummary();
   return (
     <ProviderUsageStatusContent
       {...props}
       snapshot={snapshot}
       threadMachineId={threadMachineId}
+      plan={plan}
+      reloadPlan={reloadPlan}
     />
   );
 }

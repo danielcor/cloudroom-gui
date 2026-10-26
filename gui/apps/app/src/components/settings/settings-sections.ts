@@ -100,6 +100,7 @@ export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
     members: [
       section("providers"),
       section("defaults"),
+      section("command-guard"),
       plugin("provider-claude-code", "Claude Code"),
       plugin("provider-codex", "Codex"),
       plugin("provider-acp", "ACP"),
@@ -160,13 +161,11 @@ export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
     icon: "PackageReceive",
     id: "updates",
     label: "Updates",
-    members: [section("updates"), section("community")],
-  },
-  {
-    icon: "Toolbox",
-    id: "advanced",
-    label: "Advanced",
-    members: [section("command-guard"), section("experiments")],
+    members: [
+      section("updates"),
+      section("community"),
+      section("experiments"),
+    ],
   },
 ];
 

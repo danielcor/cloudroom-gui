@@ -8,14 +8,8 @@ import { BbLogo } from "@/components/ui/bb-logo";
 import { useCloudroomAccount } from "@/hooks/queries/cloudroom-queries";
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { MACOS_WINDOW_DRAG_CLASS } from "@/lib/bb-desktop";
-import { booleanLocalStorage, createJsonLocalStorage } from "@/lib/browser-storage";
+import { createJsonLocalStorage } from "@/lib/browser-storage";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
-
-const DELAY = 24 * 60 * 60 * 1000;
-const IDLE = 10_000;
-const seenAtom = atomWithStorage("cloudroom.invites.explainerSeen", false, booleanLocalStorage, { getOnInit: true });
-const startedAtom = atomWithStorage<number | null>("cloudroom.invites.startedAt", null,
-  createJsonLocalStorage<number | null>((value): value is number => typeof value === "number"), { getOnInit: true });
 
 // Codes whose link was copied on this Mac. They stay "sent" until a friend accepts one.
 const sentAtom = atomWithStorage<string[]>("cloudroom.invites.sent", [],
@@ -23,7 +17,7 @@ const sentAtom = atomWithStorage<string[]>("cloudroom.invites.sent", [],
 
 const invitesSchema = z.object({
   codes: z.array(z.object({ code: z.string(), used: z.boolean(), url: z.string().optional(), joined: z.object({ name: z.string().nullable(), at: z.string() }).optional() })),
-  left: z.number(), created: z.string().nullable(), waiting: z.number().nullable().optional(),
+  left: z.number(), created: z.string().nullable(),
 });
 type Invites = z.infer<typeof invitesSchema>;
 type Code = Invites["codes"][number];
@@ -47,28 +41,10 @@ const manualAtom = atom(false);
 const nothingToShare = (data: Invites) => data.left === 0 && data.codes.every((item) => item.used);
 
 export function InviteOffer() {
-  const [seen, setSeen] = useAtom(seenAtom);
-  const [startedAt, setStartedAt] = useAtom(startedAtom);
-  const signedIn = Boolean(useCloudroomAccount().data?.account);
-  useEffect(() => { if (signedIn && startedAt === null) setStartedAt(Date.now()); }, [signedIn, startedAt, setStartedAt]);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
-  const due = signedIn && !seen && startedAt !== null && now - startedAt >= DELAY;
   const [manual, setManual] = useAtom(manualAtom);
-  const list = useQuery({ queryKey: INVITES_KEY, enabled: due || manual, retry: false, queryFn: ({ signal }) => invites("GET", signal) });
-  const [open, setOpen] = useState(false);
-  const ready = due && Boolean(list.data) && !open;
-  useEffect(() => {
-    if (!ready) return;
-    let lastKey = Date.now();
-    const onKey = () => { lastKey = Date.now(); };
-    window.addEventListener("keydown", onKey, true);
-    const timer = setInterval(() => { if (Date.now() - lastKey >= IDLE) setOpen(true); }, 2_000);
-    return () => { window.removeEventListener("keydown", onKey, true); clearInterval(timer); };
-  }, [ready]);
-  if (manual && list.data) return <InviteTickets data={list.data} startStep={2} finish={() => setManual(false)} />;
-  if (!due || !open || !list.data || nothingToShare(list.data)) return null;
-  return <InviteTickets data={list.data} startStep={0} finish={() => setSeen(true)} />;
+  const list = useQuery({ queryKey: INVITES_KEY, enabled: manual, retry: false, queryFn: ({ signal }) => invites("GET", signal) });
+  if (!manual || !list.data) return null;
+  return <InviteTickets data={list.data} finish={() => setManual(false)} />;
 }
 
 function useInvites() {
@@ -80,14 +56,12 @@ export function InviteSidebarRow() {
   const list = useInvites();
   const open = useSetAtom(manualAtom);
   if (!list.data || nothingToShare(list.data)) return null;
-  const left = list.data.left;
   return (
     <div className="mt-2 border-t border-sidebar-border pt-2">
       <button type="button" onClick={() => open(true)} data-testid="settings-invite"
         className="flex h-9 w-full items-center gap-2.5 rounded-md bg-primary/15 px-2 text-sm font-semibold text-sidebar-foreground hover:bg-primary/25 dark:bg-primary/8 dark:hover:bg-primary/15">
         <TicketIcon />
         Invite friends
-        {left > 0 && left <= 3 && <span className="ml-auto rounded bg-primary px-1.5 py-0.5 text-xs font-bold text-primary-foreground ring-1 ring-black/15 dark:ring-0">{left} left</span>}
       </button>
     </div>
   );
@@ -97,20 +71,13 @@ export function InviteSettingsCard() {
   const list = useInvites();
   const open = useSetAtom(manualAtom);
   if (!list.data || nothingToShare(list.data)) return null;
-  const left = list.data.left;
   return (
     <div data-testid="settings-invite-card" className="flex min-h-13 items-center gap-3 rounded-lg bg-surface-recessed py-2 pr-2.5 pl-4">
       <TicketIcon className="text-muted-foreground" />
       <p className="min-w-0 flex-1 text-sm">
         <span className="font-medium text-foreground">Enjoying Cloudroom?</span>{" "}
-        <span className="text-muted-foreground">It's invite-only. Share it with up to 3 friends.</span>
+        <span className="text-muted-foreground">Share it with a friend.</span>
       </p>
-      {left <= 3 && (
-        <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-          <span className="flex gap-0.5">{[0, 1, 2].map((index) => <span key={index} className={cn("size-1.5 rounded-full bg-muted-foreground", index < 3 - left && "opacity-25")} />)}</span>
-          {left} left
-        </span>
-      )}
       <button type="button" onClick={() => open(true)} className="h-8 shrink-0 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:brightness-95">
         Invite a friend
       </button>
@@ -123,8 +90,7 @@ const ROOT: CSSProperties = {
   background: `radial-gradient(900px 600px at 76% 52%, rgba(191,255,0,.12), transparent 60%), radial-gradient(700px 500px at 10% 0%, rgba(243,236,219,.06), transparent 60%), ${INK}`,
 };
 
-function InviteTickets({ data, startStep, finish }: { data: Invites; startStep: number; finish: () => void }) {
-  const [step, setStep] = useState(startStep);
+function InviteTickets({ data, finish }: { data: Invites; finish: () => void }) {
   const [sent, setSent] = useAtom(sentAtom);
   // The ticket the member clicked in the stub rail, or NEW for a ticket not made yet. Null shows the next one to send.
   const [picked, setPicked] = useState<string | null>(null);
@@ -133,7 +99,7 @@ function InviteTickets({ data, startStep, finish }: { data: Invites; startStep: 
   const create = useMutation({
     mutationFn: () => invites("POST"),
     onSuccess: (result) => {
-      client.setQueryData(INVITES_KEY, { ...result, waiting: data.waiting });
+      client.setQueryData(INVITES_KEY, result);
       setPicked(result.created ?? result.codes.find((item) => status(item) === "ready")?.code ?? null);
     },
   });
@@ -150,16 +116,12 @@ function InviteTickets({ data, startStep, finish }: { data: Invites; startStep: 
   };
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => { root.current?.focus(); }, []);
-  const next = () => setStep((value) => value + 1);
-  const waiting = data.waiting ?? null;
-  // Admins have unlimited codes, so the rail shows their newest 2 and one to make.
-  const member = data.left + data.codes.length <= 3;
   const number = ticket ? data.codes.indexOf(ticket) + 1 : data.codes.length + 1;
-  const blanks = Math.min(data.left, 3 - Math.min(data.codes.length, 2));
-  const shown = blanks >= 3 ? [] : data.codes.slice(blanks - 3);
+  const blanks = Math.min(data.left, 1);
+  const shown = data.codes.slice(blanks - 3);
   const done = <button type="button" onClick={finish} className="h-[50px] border border-[#3a372f] px-6 text-[15px] font-semibold text-[#d8d0bd] transition-transform hover:scale-105 hover:border-[#5a564b]">Done</button>;
   const send = {
-    title: <>Your {number === 1 ? "first" : member && number === 3 ? "last" : "next"}<br /><em>ticket</em>.</>,
+    title: <>Your {number === 1 ? "first" : "next"}<br /><em>ticket</em>.</>,
     lede: "Send it to a friend who builds with agents.",
   };
   const final = state === "joined" ? {
@@ -178,76 +140,47 @@ function InviteTickets({ data, startStep, finish }: { data: Invites; startStep: 
     </>,
   };
 
-  const steps: { title: ReactNode; lede: string; actions: ReactNode; art: ReactNode }[] = [
-    {
-      title: waiting === null ? <>The line is <em>long</em>.</> : <>{waiting.toLocaleString("en-US")} people<br />joined the <em>waitlist</em>.</>,
-      lede: "Your ticket lets a friend skip the waitlist and start using Cloudroom today.",
-      actions: <Primary onClick={next}>Continue <Arrow /></Primary>,
-      art: (
-        <Ticket style={{ left: 90, top: 220, transform: "rotate(-4deg) scale(1.15)" }} number="No." label="WAITLIST" kicker="Cloudroom · waitlist"
-          title={waiting === null ? "In line" : `No. ${(waiting + 1).toLocaleString("en-US")}`} sub="Your friend's spot in line" foot="NOT YET" stamp={{ text: "WAIT", ink: true }} />
-      ),
-    },
-    {
-      title: <>Three tickets.<br /><em>Yours</em> for life.</>,
-      lede: "Each one lets one friend in. No refills.",
-      actions: <Primary onClick={next}>Continue <Arrow /></Primary>,
-      art: [2, 1, 0].map((index) => {
-        const made = data.codes[index];
-        return (
-          <Ticket key={index} style={TRIO[index]} number={`0${index + 1}`} label={`NO. ${index + 1} OF 3`} title={index === 0 ? <Highlight>Invite</Highlight> : "Invite"}
-            sub="Lets one friend in." foot={made && !made.used ? format(made.code) : "••••-••••"} used={made?.used}
-            stamp={made ? STAMPS[status(made)] : { text: "UNUSED" }} />
-        );
-      }),
-    },
-    {
-      ...final,
-      art: <>
-        {!data.codes.length && <>
-          <Ticket dim style={{ left: 150, top: 110, transform: "rotate(7deg) scale(.9)" }} number="" label="" title="Invite" foot="••••-••••" />
-          <Ticket dim style={{ left: 120, top: 170, transform: "rotate(3deg) scale(.95)" }} number="" label="" title="Invite" foot="••••-••••" />
-        </>}
-        <Ticket style={data.codes.length ? { left: 60, top: 140, transform: "rotate(-4deg) scale(1.15)" } : { left: 80, top: 250, transform: "rotate(-4deg) scale(1.2)" }}
-          number={pad(number)} label={number <= 3 ? `NO. ${number} OF 3` : `NO. ${number}`} title={state === "joined" ? "Invite" : <Highlight>Invite</Highlight>}
-          sub={state === "joined" ? (ticket!.joined ? `${ticket!.joined.name ?? "A friend"} joined · ${day(ticket!.joined.at)}` : "Used") : state === "sent" ? "Sent · not accepted yet" : "One click lets them in."}
-          foot={ticket ? format(ticket.code) : "••••-••••"} live={Boolean(ticket)} used={state === "joined"} stamp={state ? STAMPS[state] : { text: "UNUSED" }} />
-        {data.codes.length > 0 && (
-          <div className="absolute top-[480px] left-9 flex gap-4">
-            <p className="absolute -top-[30px] left-0 font-mono text-[11px] tracking-[0.2em] whitespace-nowrap text-[#8d8676] uppercase">Your tickets</p>
-            {shown.map((item) => {
-              const itemState = status(item);
-              return <Stub key={item.code} number={pad(data.codes.indexOf(item) + 1)} code={format(item.code)} state={itemState} on={item === ticket} onClick={() => setPicked(item.code)}
-                line={itemState === "joined" ? (item.joined?.name ? `${item.joined.name} joined` : "Joined") : itemState === "sent" ? "Sent · waiting" : "Ready to send"} />;
-            })}
-            {Array.from({ length: blanks }, (_, index) => (
-              <Stub key={index} number={pad(data.codes.length + index + 1)} code={null} line="Not made yet" on={!ticket && index === 0} onClick={() => setPicked(NEW)} />
-            ))}
-          </div>
-        )}
-      </>,
-    },
-  ];
-  const current = steps[step]!;
+  const current = {
+    ...final,
+    art: <>
+      {!data.codes.length && <>
+        <Ticket dim style={{ left: 150, top: 110, transform: "rotate(7deg) scale(.9)" }} number="" label="" title="Invite" foot="••••-••••" />
+        <Ticket dim style={{ left: 120, top: 170, transform: "rotate(3deg) scale(.95)" }} number="" label="" title="Invite" foot="••••-••••" />
+      </>}
+      <Ticket style={data.codes.length ? { left: 60, top: 140, transform: "rotate(-4deg) scale(1.15)" } : { left: 80, top: 250, transform: "rotate(-4deg) scale(1.2)" }}
+        number={pad(number)} label={`NO. ${number}`} title={state === "joined" ? "Invite" : <Highlight>Invite</Highlight>}
+        sub={state === "joined" ? (ticket!.joined ? `${ticket!.joined.name ?? "A friend"} joined · ${day(ticket!.joined.at)}` : "Used") : state === "sent" ? "Sent · not accepted yet" : "One click lets them in."}
+        foot={ticket ? format(ticket.code) : "••••-••••"} live={Boolean(ticket)} used={state === "joined"} stamp={state ? STAMPS[state] : { text: "UNUSED" }} />
+      {data.codes.length > 0 && (
+        <div className="absolute top-[480px] left-9 flex gap-4">
+          <p className="absolute -top-[30px] left-0 font-mono text-[11px] tracking-[0.2em] whitespace-nowrap text-[#8d8676] uppercase">Your tickets</p>
+          {shown.map((item) => {
+            const itemState = status(item);
+            return <Stub key={item.code} number={pad(data.codes.indexOf(item) + 1)} code={format(item.code)} state={itemState} on={item === ticket} onClick={() => setPicked(item.code)}
+              line={itemState === "joined" ? (item.joined?.name ? `${item.joined.name} joined` : "Joined") : itemState === "sent" ? "Sent · waiting" : "Ready to send"} />;
+          })}
+          {Array.from({ length: blanks }, (_, index) => (
+            <Stub key={index} number={pad(data.codes.length + index + 1)} code={null} line="Not made yet" on={!ticket && index === 0} onClick={() => setPicked(NEW)} />
+          ))}
+        </div>
+      )}
+    </>,
+  };
 
   return (
     <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Invite friends" style={ROOT}
       className="fixed inset-0 z-50 overflow-hidden text-[#f3ecdb] max-md:h-(--bb-shell-height) max-md:overflow-y-auto outline-none duration-300 animate-in fade-in-0">
       <div className={cn("absolute inset-x-0 top-0 h-10", MACOS_WINDOW_DRAG_CLASS)} />
-      <div className="absolute top-[13px] left-1/2 max-md:top-[calc(env(safe-area-inset-top)+10px)] flex -translate-x-1/2 gap-1.5">
-        {steps.map((_, index) => <span key={index} className={cn("h-[3px] w-11", index <= step ? "bg-[#bfff00]" : "bg-[#2c2a24]")} />)}
-      </div>
       <div className="flex h-full items-center max-md:h-auto max-md:min-h-full max-md:flex-col max-md:justify-center max-md:pt-[calc(env(safe-area-inset-top)+32px)] max-md:pb-[calc(env(safe-area-inset-bottom)+28px)]">
         <div className="w-[44%] shrink-0 pr-8 pl-[8.5%] max-md:w-full max-md:px-7">
           <div className="flex items-center gap-2.5 font-mono text-xs tracking-[0.2em] text-[#8d8676] uppercase">
             <BbLogo className="size-[22px]" />
-            Cloudroom · invite-only
+            Cloudroom
           </div>
           <h1 className="mt-7 font-serif text-[64px] max-md:mt-5 max-md:text-[42px] leading-[1.02] font-medium tracking-[-0.03em] [&_em]:text-[#bfff00]">{current.title}</h1>
           <p className="mt-5 max-w-[400px] text-lg text-[#bdb5a2] max-md:mt-3 max-md:text-base">{current.lede}</p>
           <div className="mt-10 flex items-center gap-6 max-md:mt-7">
             {current.actions}
-            {step < steps.length - 1 && <span className="font-mono text-xs tracking-[0.16em] text-[#8d8676]">0{step + 1} / 0{steps.length}</span>}
           </div>
           {create.error && <p className="mt-4 text-sm text-[#ff8a7a]">{create.error.message}</p>}
         </div>
@@ -259,11 +192,6 @@ function InviteTickets({ data, startStep, finish }: { data: Invites; startStep: 
   );
 }
 
-const TRIO: CSSProperties[] = [
-  { left: 50, top: 30, transform: "rotate(-9deg)" },
-  { left: 140, top: 210, transform: "rotate(4deg)" },
-  { left: 60, top: 390, transform: "rotate(-3deg)" },
-];
 const NOTCHED = "radial-gradient(circle at 100px 0, transparent 13px, #000 13.5px) top/100% 51% no-repeat, radial-gradient(circle at 100px 100%, transparent 13px, #000 13.5px) bottom/100% 51% no-repeat";
 const PAPER: CSSProperties = { backgroundColor: "#f3ecdb", backgroundImage: "repeating-linear-gradient(90deg, transparent 0 22px, rgba(120,100,60,.05) 22px 23px)" };
 
@@ -299,7 +227,6 @@ function Ticket({ style, number, label, kicker = "Cloudroom · admit one", title
 
 const STUB_NOTCHED = "radial-gradient(circle at 44px 0, transparent 8px, #000 8.5px) top/100% 51% no-repeat, radial-gradient(circle at 44px 100%, transparent 8px, #000 8.5px) bottom/100% 51% no-repeat";
 
-// A small ticket in step 3's rail. Clicking it shows that ticket in full.
 function Stub({ number, code, state, line, on, onClick }: { number: string; code: string | null; state?: Status; line: string; on: boolean; onClick: () => void }) {
   const used = state === "joined";
   return (
@@ -331,6 +258,5 @@ function Primary({ children, onClick, disabled }: { children: ReactNode; onClick
   );
 }
 
-const Arrow = () => <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 8h10M9 4l4 4-4 4" /></svg>;
 const TicketIcon = ({ className = "text-primary" }: { className?: string }) => <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0", className)} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" /><path d="M13 5v2M13 11v2M13 17v2" /></svg>;
 const CopyIcon = () => <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="5" y="5" width="8.5" height="8.5" /><path d="M2.5 10.5v-8h8" /></svg>;

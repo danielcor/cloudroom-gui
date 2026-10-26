@@ -15,6 +15,7 @@ import { fetchWithAppSurface } from "@/lib/app-surface";
 import { useIsCompactViewport } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
 import { ProviderRequirementBanner } from "./banner/ProviderRequirementBanner";
 import { CloudQueueCard, FreePlanTip, OgLetter } from "@/components/CloudQueue";
+import { StarterPrompts } from "@/components/ActivationChecklist";
 import { TryCloudHint } from "@/components/promptbox/TryCloudHint";
 import { CloudBranchPicker } from "./CloudBranchPicker";
 import { Button } from "@cloudroom/shared-ui/button";
@@ -1572,6 +1573,8 @@ export function NewThreadComposer({
                 ? "Type a message first"
                 : null))
       : localSubmitDisabledReason;
+  const starterRef = useRef<string | null>(null);
+  const starterHigh = availableReasoningOptions.some((option) => option.value === "high");
   const submitDraft = useCallback(
     async (
       blockedReason: string | null,
@@ -1606,7 +1609,7 @@ export function NewThreadComposer({
         projectId,
         providerId: selectedProviderId,
         model: selectedThreadModel,
-        reasoningLevel,
+        reasoningLevel: starterHigh && submittedDraft.text === starterRef.current ? "high" : reasoningLevel,
         permissionMode: executionTarget === "cloud" ? "full" : permissionMode,
         ...(executionTarget === "cloud"
           ? { executionTarget, serviceTier: cloudFastSupported && serviceTier ? serviceTier : "default", ...(cloudBaseBranch ? { baseBranch: cloudBaseBranch } : {}) }
@@ -1675,6 +1678,7 @@ export function NewThreadComposer({
       supportsServiceTier,
       cloudFastSupported,
       cloudBaseBranch,
+      starterHigh,
     ],
   );
 
@@ -1686,6 +1690,18 @@ export function NewThreadComposer({
     },
     [submitDraft],
   );
+  const [starter, setStarter] = useState<string | null>(null);
+  const pickStarter = useCallback((text: string) => {
+    promptDraft.setDraft({ text, mentions: [], attachments: [] });
+    selectCloudTarget();
+    starterRef.current = text;
+    setStarter(text);
+  }, [promptDraft, selectCloudTarget]);
+  useEffect(() => {
+    if (starter === null || executionTarget !== "cloud" || submitDisabledReason !== null) return;
+    setStarter(null);
+    if (promptDraft.getCurrent().text === starter) void handleSubmit(null);
+  }, [starter, executionTarget, submitDisabledReason, promptDraft, handleSubmit]);
   useEffect(() => {
     submitProgrammaticallyRef.current = async (
       submitOptions,
@@ -1861,7 +1877,7 @@ export function NewThreadComposer({
                   localStorage.setItem("cloudroom.executionTarget", "local");
                 }}
               />
-            ) : <><OgLetter /><FreePlanTip /></>,
+            ) : <><StarterPrompts onPick={pickStarter} /><OgLetter /><FreePlanTip /></>,
             banner:
               executionTarget === "cloud" ? (
                 cloudBlockedReason === null ? null : (

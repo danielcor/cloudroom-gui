@@ -1,4 +1,9 @@
-import { hasQueuedRetryOfTurnRequest } from "@cloudroom/db";
+import {
+  deleteQueuedThreadMessage,
+  deleteQueuedThreadRetries,
+  getLatestThreadSequence,
+  hasQueuedRetryOfTurnRequest,
+} from "@cloudroom/db";
 import { permissionModeSchema } from "@cloudroom/domain";
 import type {
   ClientTurnRequestId,
@@ -12,8 +17,10 @@ import type {
   SendMessageRequest,
 } from "@cloudroom/server-contract";
 import { ApiError } from "../../errors.js";
+import { emitPluginMessageCancelled } from "../plugins/plugin-thread-events.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { attemptDispatch } from "./dispatch-attempt.js";
+import { toThreadQueuedMessage } from "./thread-queued-messages.js";
 import {
   loadFailedTurn,
   retryChain,
@@ -172,6 +179,34 @@ function retryExecution(failed: FailedTurnRecord): {
  */
 const retriesInFlight = new Set<string>();
 
+const explicitStops = new Map<string, { sequence: number }>();
+
+export function cancelRetriesForExplicitStop(
+  deps: Pick<TurnRetryDeps, "db" | "hub">,
+  threadId: string,
+): number {
+  explicitStops.delete(threadId);
+  explicitStops.set(threadId, {
+    sequence: getLatestThreadSequence(deps.db, { threadId }),
+  });
+  if (explicitStops.size > 1_000) {
+    explicitStops.delete(explicitStops.keys().next().value ?? threadId);
+  }
+  const cancelled = deleteQueuedThreadRetries(deps.db, deps.hub, threadId);
+  for (const row of cancelled) {
+    emitPluginMessageCancelled(toThreadQueuedMessage(row));
+  }
+  return cancelled.length;
+}
+
+function stoppedWhileScheduling(threadId: string): ApiError {
+  return new ApiError(
+    409,
+    "no_failed_turn",
+    `Thread ${threadId} was stopped while its retry was being scheduled.`,
+  );
+}
+
 /**
  * Re-submits a failed turn.
  *
@@ -191,6 +226,18 @@ export async function retryFailedTurn(
     thread,
     turnRequestId: request.turnRequestId,
   });
+  const stop = explicitStops.get(thread.id);
+  if (
+    request.turnRequestId !== null &&
+    stop !== undefined &&
+    stop.sequence >= failed.requestSequence
+  ) {
+    throw new ApiError(
+      409,
+      "no_failed_turn",
+      `Thread ${thread.id} was stopped after turn ${failed.request.requestId} failed.`,
+    );
+  }
   const chain = retryChain(failed.request);
   const originalRequestId = chain.originalRequestId;
   const inFlightKey = `${thread.id}:${originalRequestId}`;
@@ -226,11 +273,22 @@ export async function retryFailedTurn(
       },
       pluginSubmission: null,
       retryOf: { requestId: originalRequestId, attempt },
+      beforeDispatch: () => {
+        if (explicitStops.get(thread.id) !== stop) {
+          throw stoppedWhileScheduling(thread.id);
+        }
+      },
       origin: null,
       originPluginId: null,
       startedOnBehalfOf: null,
       trigger: "user",
     });
+    if (outcome.kind === "queued" && explicitStops.get(thread.id) !== stop) {
+      if (deleteQueuedThreadMessage(deps.db, deps.hub, outcome.entry.id)) {
+        emitPluginMessageCancelled(outcome.entry);
+      }
+      throw stoppedWhileScheduling(thread.id);
+    }
     if (outcome.kind === "dispatched") {
       return {
         ok: true,

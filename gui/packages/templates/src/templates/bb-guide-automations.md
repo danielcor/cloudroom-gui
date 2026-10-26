@@ -19,7 +19,7 @@ run a prompt in a thread; script loops run stored code without model usage.
   room-cli loop review [--all]        What loops did in the last 7 days
   room-cli loop review mark <itemId...> [--undo]
   room-cli loop templates            Ready-made loops
-  room-cli loop create --template <id> --project <id> [--cloud]
+  room-cli loop create --template <id> --project <id> [--local]
   room-cli loop settings [--stop-at-limit on|off]
 
 Every loop has a priority, P1 (essential) to P4 (niche): `--priority 1-4` on

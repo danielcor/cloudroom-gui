@@ -22,6 +22,7 @@ import {
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 import { cloudroom, isCloudThread } from "../cloudroom/commands.js";
+import { macAccess } from "../cloudroom/previews.js";
 import { teleportBlocked } from "../cloudroom/store.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
 import { requirePrimaryHostId } from "../hosts/primary-host.js";
@@ -30,7 +31,10 @@ import {
   provisionUnmanagedEnvironmentForPath,
   resolveReadyEnvironment,
 } from "./thread-environment-directory.js";
-import { appendThreadEventInTransaction } from "./thread-events.js";
+import {
+  appendThreadEvent,
+  appendThreadEventInTransaction,
+} from "./thread-events.js";
 import { setThreadReadyHook } from "./queued-message-dispatch.js";
 import { historySeed } from "./thread-harness-switch.js";
 import { stopThreadForCurrentState } from "./thread-lifecycle.js";
@@ -41,13 +45,23 @@ export interface ThreadMoveResult {
   previousPath: string | null;
 }
 
-const pendingMoves = new Map<string, string>();
+export type MoveRequester = "local" | "cloud-agent";
+
+const AGENT_MOVE_REFUSED =
+  "The agent asked to move this thread to another project. Cloudroom didn't move it because Mac access isn't Full. Move it from the thread menu.";
+
+const pendingMoves = new Map<
+  string,
+  { projectId: string; requestedBy: MoveRequester }
+>();
 
 export async function moveThreadToProject(
   deps: AppDeps,
   threadId: string,
   projectRef: string,
+  requestedBy: MoveRequester,
 ): Promise<ThreadMoveResult> {
+  const allowed = requestedBy === "local" || (await macAccess(deps)) === "full";
   const thread = getThread(deps.db, threadId);
   if (!thread || thread.deletedAt !== null) {
     throw new ApiError(404, "thread_not_found", "Thread not found");
@@ -59,6 +73,7 @@ export async function moveThreadToProject(
       "Unarchive the thread, then move it.",
     );
   }
+  if (!allowed) refuseAgentMove(deps, thread);
   const project = resolveProject(deps, projectRef);
   if (project.id === thread.projectId) {
     pendingMoves.delete(thread.id);
@@ -79,7 +94,7 @@ export async function moveThreadToProject(
     deps.pendingInteractions.hasPendingThreadInteraction(thread.id) ||
     teleportBlocked(deps.db, thread.id)
   ) {
-    pendingMoves.set(thread.id, project.id);
+    pendingMoves.set(thread.id, { projectId: project.id, requestedBy });
     return { thread, moved: false, previousPath: null };
   }
   pendingMoves.delete(thread.id);
@@ -109,23 +124,45 @@ export function installThreadMoves(deps: AppDeps): void {
       setImmediate(() => void applyPendingThreadMove(deps, threadId));
   });
   cloudroom(deps).moveRequest = (threadId, project) =>
-    void moveThreadToProject(deps, threadId, project).catch((error: unknown) =>
-      deps.logger.warn({ error, threadId }, "Cloud self-move failed"),
+    void moveThreadToProject(deps, threadId, project, "cloud-agent").catch(
+      (error: unknown) =>
+        deps.logger.warn({ error, threadId }, "Cloud self-move failed"),
     );
+}
+
+function refuseAgentMove(deps: AppDeps, thread: Thread): never {
+  appendThreadEvent(deps, {
+    threadId: thread.id,
+    environmentId: thread.environmentId,
+    type: "system/operation",
+    scope: threadScope(),
+    data: {
+      operation: "thread_move",
+      operationId: createEventId(),
+      status: "failed",
+      message: AGENT_MOVE_REFUSED,
+    },
+  });
+  throw new ApiError(403, "mac_access", AGENT_MOVE_REFUSED);
 }
 
 async function applyPendingThreadMove(
   deps: AppDeps,
   threadId: string,
 ): Promise<void> {
-  const projectId = pendingMoves.get(threadId);
-  if (projectId === undefined) return;
+  const pending = pendingMoves.get(threadId);
+  if (pending === undefined) return;
   pendingMoves.delete(threadId);
   try {
-    await moveThreadToProject(deps, threadId, projectId);
+    await moveThreadToProject(
+      deps,
+      threadId,
+      pending.projectId,
+      pending.requestedBy,
+    );
   } catch (error) {
     if (error instanceof ApiError && error.body.code === "thread_busy") {
-      if (!pendingMoves.has(threadId)) pendingMoves.set(threadId, projectId);
+      if (!pendingMoves.has(threadId)) pendingMoves.set(threadId, pending);
       return;
     }
     deps.logger.warn({ error, threadId }, "Thread move failed");

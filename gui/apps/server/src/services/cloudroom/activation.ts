@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { threads } from "@cloudroom/db";
 import type { AppDeps } from "../../types.js";
 import { ACTIVATION_STEPS, type ActivationStep } from "../system/telemetry.js";
@@ -37,7 +37,17 @@ export async function notePhoneUse(deps: AppDeps): Promise<void> {
   if (!state.done.has("phone")) await markDone(deps, state, ["phone"]);
 }
 
-export async function activation(deps: AppDeps): Promise<{ steps: Record<ActivationStep, boolean>; second: "codex" | "claude-code" }> {
+const readImported = (deps: AppDeps, name: string) =>
+  readFile(join(deps.config.dataDir, name), "utf8").then((text) => Object.values(JSON.parse(text) as Record<string, string>), () => []);
+
+async function startedThreads(deps: AppDeps): Promise<number> {
+  const imported = [...new Set((await Promise.all([readImported(deps, "session-imports.json"), readImported(deps, "bb-imports.json")])).flat())];
+  const [row] = deps.db.select({ n: sql<number>`count(*)` }).from(threads)
+    .where(and(isNull(threads.parentThreadId), isNull(threads.originPluginId), imported.length ? notInArray(threads.id, imported) : undefined)).all();
+  return row?.n ?? 0;
+}
+
+export async function activation(deps: AppDeps): Promise<{ steps: Record<ActivationStep, boolean>; second: "codex" | "claude-code"; started: number }> {
   const state = await load(deps);
   const cloud = eq(threads.executionTarget, "cloud");
   const providers = deps.db.selectDistinct({ id: threads.providerId }).from(threads).where(cloud).limit(3).all().map((row) => row.id);
@@ -63,5 +73,6 @@ export async function activation(deps: AppDeps): Promise<{ steps: Record<Activat
   return {
     steps: Object.fromEntries(ACTIVATION_STEPS.map((step) => [step, state.done.has(step)])) as Record<ActivationStep, boolean>,
     second: providers.includes("codex") && !providers.includes("claude-code") ? "claude-code" : "codex",
+    started: await startedThreads(deps),
   };
 }

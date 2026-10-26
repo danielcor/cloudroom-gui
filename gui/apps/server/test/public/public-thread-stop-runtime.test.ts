@@ -51,7 +51,10 @@ describe("thread runtime stop", () => {
 
       const response = await responsePromise;
       expect(response.status).toBe(200);
-      await expect(readJson(response)).resolves.toEqual({ ok: true });
+      await expect(readJson(response)).resolves.toEqual({
+        ok: true,
+        cancelledRetries: 0,
+      });
       expect(getThread(harness.db, thread.id)?.status).toBe("idle");
       expect(
         listEvents(harness.db, { threadId: thread.id }).filter(
@@ -590,7 +593,10 @@ describe("thread runtime stop", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(readJson(response)).resolves.toEqual({ ok: true });
+      await expect(readJson(response)).resolves.toEqual({
+        ok: true,
+        cancelledRetries: 0,
+      });
       expect(getThread(harness.db, thread.id)?.status).toBe("idle");
     });
   });

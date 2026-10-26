@@ -29,6 +29,7 @@ import {
   PERMISSION_MODE_HELP,
   PLAN_HELP,
   buildPromptInputs,
+  requirePromptContent,
   uploadClientAttachmentInputs,
 } from "./helpers.js";
 import { SEND_AT_HELP, parseSendAt } from "./send-time.js";
@@ -601,9 +602,15 @@ export function registerActionsCommands(
         action(async (id: string | undefined, opts: ThreadActionOptions) => {
           const threadId = requireThreadIdOrSelf(id, opts);
           const sdk = createCliBbSdk(getUrl());
-          await sdk.threads[method]({ threadId });
-          if (outputJson(opts, { ok: true, threadId })) return;
-          console.log(`Thread ${threadId} ${done}`);
+          const result: { ok: true; cancelledRetries?: number } =
+            await sdk.threads[method]({ threadId });
+          if (outputJson(opts, { ...result, threadId })) return;
+          const cancelled = result.cancelledRetries ?? 0;
+          console.log(
+            cancelled > 0
+              ? `Thread ${threadId} ${done}; cancelled ${cancelled} pending automatic ${cancelled === 1 ? "retry" : "retries"}`
+              : `Thread ${threadId} ${done}`,
+          );
         }),
       );
   }
@@ -646,6 +653,7 @@ export function registerActionsCommands(
 export async function postThreadMessage(
   args: PostThreadMessageArgs,
 ): Promise<PostThreadMessageResult> {
+  requirePromptContent(args);
   const sdk = createCliBbSdk(args.getUrl());
   const thread =
     args.mode === undefined

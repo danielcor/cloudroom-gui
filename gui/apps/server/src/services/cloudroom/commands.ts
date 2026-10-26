@@ -569,7 +569,7 @@ class CloudroomService {
   private async connection(): Promise<Connection> {
     const saved = await this.savedConnection();
     if (saved?.sandboxToken && (!saved.token || !saved.url)) throw new ApiError(409, "cloudroom_sandbox_only", "This action needs a cloud thread. Each cloud thread has its own sandbox, not one shared VM.");
-    if (!saved?.token) throw new ApiError(503, "cloudroom_not_configured", "Cloud is an invite-only beta. Join the waitlist at cloudroom.dev, or sign in if you're invited.");
+    if (!saved?.token) throw new ApiError(503, "cloudroom_not_configured", "Cloud needs a free Cloudroom account. Sign in to use it.");
     const { account: _account, websiteUrl: _website, onboarding: _onboarding, sandboxToken: _sandboxToken, ...connection } = saved;
     return connectionSchema.parse(connection);
   }

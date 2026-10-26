@@ -102,8 +102,7 @@ export function command(db: DbQueryConnection, id: string): Command | null {
 }
 
 export function unstartedTurn(db: DbQueryConnection, threadId: string): Command | null {
-  const turnId = binding(db, threadId)?.turnId;
-  const turn = turnId ? command(db, turnId) : null;
+  const turn = command(db, binding(db, threadId)?.turnId ?? `first_${threadId}`);
   return turn?.command === "prompt" && (turn.state === "sending" || turn.state === "accepted") ? turn : null;
 }
 

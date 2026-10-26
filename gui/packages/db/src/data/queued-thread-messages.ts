@@ -1389,6 +1389,25 @@ export function listThreadIdsWithHostOfflineQueueWaits(
     .map((row) => row.threadId);
 }
 
+export function deleteQueuedThreadRetries(
+  db: DbConnection,
+  notifier: DbNotifier,
+  threadId: string,
+): QueuedThreadMessageRow[] {
+  const deleted = db
+    .delete(queuedThreadMessages)
+    .where(
+      and(
+        eq(queuedThreadMessages.threadId, threadId),
+        eq(queuedThreadMessages.payloadKind, "retry"),
+      ),
+    )
+    .returning()
+    .all();
+  if (deleted.length > 0) notifier.notifyThread(threadId, ["queue-changed"]);
+  return deleted;
+}
+
 export function deleteQueuedThreadMessage(
   db: DbConnection,
   notifier: DbNotifier,

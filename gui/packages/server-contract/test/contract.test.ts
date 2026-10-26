@@ -1128,7 +1128,34 @@ describe("server-contract canonical schemas", () => {
           workspace: { type: "unmanaged", path: null },
         },
       }),
-    ).toThrow("input must contain at least one entry");
+    ).toThrow("input must contain non-blank text or an attachment");
+  });
+
+  it("rejects a blank prompt on start and send but accepts attachments", () => {
+    const blank = [{ type: "text", text: "  \n" }];
+    const start = {
+      projectId: "proj_123",
+      providerId: "codex",
+      origin: "cli",
+      environment: {
+        type: "host",
+        hostId: "host_abc",
+        workspace: { type: "unmanaged", path: null },
+      },
+    };
+    expect(
+      createThreadRequestSchema.safeParse({ ...start, input: blank }).success,
+    ).toBe(false);
+    expect(
+      sendMessageRequestSchema.safeParse({ input: blank, mode: "auto" })
+        .success,
+    ).toBe(false);
+    expect(
+      sendMessageRequestSchema.safeParse({
+        input: [...blank, { type: "localImage", path: "/tmp/a.png" }],
+        mode: "auto",
+      }).success,
+    ).toBe(true);
   });
 
   it("accepts empty input for an idle fork", () => {

@@ -17,14 +17,13 @@ import {
 } from "@/components/sidebar/SectionSidebar";
 import { InviteSidebarRow } from "@/components/InviteOffer";
 import { useCloseMobileSidebar } from "@/components/ui/sidebar.js";
-import { useCloudroomAccount } from "@/hooks/queries/cloudroom-queries";
 import { canOpenNativeScreen, shellOpenNative } from "@/lib/native-shell";
+import { SettingsAccountMenu } from "./SettingsAccountMenu";
 import { useSettingsNavState } from "./settings-nav";
 import type { SettingsNavState } from "./settings-nav";
 import {
   findSettingsNavGroup,
   getSettingsGroupLinks,
-  getSettingsSectionRoutePath,
   SETTINGS_NAV_GROUPS,
 } from "./settings-sections";
 import {
@@ -111,8 +110,6 @@ export function SettingsSidebarContent({
     const links = getSettingsGroupLinks(group, navigation);
     return links.length > 0 ? [{ group, to: links[0]!.to }] : [];
   });
-  const listRows = rows.filter(({ group }) => group.id !== "advanced");
-  const advancedRow = rows.find(({ group }) => group.id === "advanced");
 
   const footer = (
     <div className="space-y-2">
@@ -124,16 +121,6 @@ export function SettingsSidebarContent({
         >
           <SectionSidebarIcon name="Smartphone" />
         </SectionSidebarActionRow>
-      ) : null}
-      {advancedRow && !searching ? (
-        <SectionSidebarRow
-          active={activeGroup.id === "advanced"}
-          className="border border-sidebar-border"
-          label="Advanced"
-          to={advancedRow.to}
-        >
-          <SectionSidebarIcon name={advancedRow.group.icon} />
-        </SectionSidebarRow>
       ) : null}
       {account}
     </div>
@@ -239,7 +226,7 @@ export function SettingsSidebarContent({
         </>
       ) : (
         <div className="space-y-0.5">
-          {listRows.map(({ group, to }) => (
+          {rows.map(({ group, to }) => (
             <SectionSidebarRow
               key={group.id}
               active={activeGroup.id === group.id}
@@ -256,37 +243,6 @@ export function SettingsSidebarContent({
   );
 }
 
-function SettingsAccountCard() {
-  const status = useCloudroomAccount().data;
-  const email = status?.account?.email;
-  const closeOnMobile = useCloseMobileSidebar();
-  return (
-    <Link
-      to={getSettingsSectionRoutePath("machines")}
-      onClick={closeOnMobile}
-      data-testid="settings-account-card"
-      className="flex items-center gap-2.5 rounded-md border-t border-sidebar-border px-2 pt-3 pb-1 text-sidebar-foreground hover:bg-sidebar-accent"
-    >
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-        {email ? email[0]!.toUpperCase() : <Icon name="UserRound" className="size-4" />}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm">
-          {email ?? "Sign in to Cloudroom"}
-        </span>
-        <span className="block truncate text-xs text-muted-foreground">
-          {!email
-            ? "Local threads only"
-            : status?.ready
-              ? "Cloud connected"
-              : "Cloud unavailable"}
-        </span>
-      </span>
-      <Icon name="ChevronRight" className="size-3.5 shrink-0 text-muted-foreground" />
-    </Link>
-  );
-}
-
 export function SettingsSidebar({
   onResizeMouseDown,
   isResizing,
@@ -297,7 +253,13 @@ export function SettingsSidebar({
 
   return (
     <SettingsSidebarContent
-      account={<SettingsAccountCard />}
+      account={
+        <SettingsAccountMenu
+          usagePage={navigation.pluginEntries.some(
+            ({ id }) => id === "provider-usage",
+          )}
+        />
+      }
       invite={<InviteSidebarRow />}
       appRoutePath={appRoutePath}
       isResizing={isResizing}

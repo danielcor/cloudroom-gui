@@ -32,7 +32,10 @@ import {
   threadVisibilitySchema,
   threadWithRuntimeSchema,
 } from "@cloudroom/domain";
-import type { CallerExecutionInputSource } from "@cloudroom/domain";
+import type {
+  CallerExecutionInputSource,
+  PromptInput,
+} from "@cloudroom/domain";
 import { THREAD_EVENT_LIST_PAGE_SIZE } from "../common.js";
 import {
   timelineDeltaSchema,
@@ -95,6 +98,13 @@ export const startedOnBehalfOfSchema = z.object({
   senderThreadId: z.string().min(1),
 });
 export type StartedOnBehalfOf = z.infer<typeof startedOnBehalfOfSchema>;
+
+const PROMPT_CONTENT_MESSAGE =
+  "input must contain non-blank text or an attachment";
+
+function hasPromptContent(input: readonly PromptInput[]): boolean {
+  return input.some((item) => item.type !== "text" || item.text.trim() !== "");
+}
 
 export const createThreadRequestSchema = z
   .object({
@@ -168,10 +178,10 @@ export const createThreadRequestSchema = z
         path: ["originPluginId"],
       });
     }
-    if (value.originKind === null && value.input.length === 0) {
+    if (value.originKind === null && !hasPromptContent(value.input)) {
       ctx.addIssue({
         code: "custom",
-        message: "input must contain at least one entry",
+        message: PROMPT_CONTENT_MESSAGE,
         path: ["input"],
       });
     }
@@ -264,7 +274,10 @@ const sendMessageRequestFieldsSchema = z.object({
   sendAt: z.number().int().nonnegative().optional(),
 });
 
-export const sendMessageRequestSchema = sendMessageRequestFieldsSchema;
+export const sendMessageRequestSchema = sendMessageRequestFieldsSchema.refine(
+  (value) => hasPromptContent(value.input),
+  { message: PROMPT_CONTENT_MESSAGE, path: ["input"] },
+);
 export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
 
 /**

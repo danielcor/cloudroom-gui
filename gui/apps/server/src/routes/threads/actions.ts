@@ -33,7 +33,10 @@ import {
   emitPluginThreadUnarchived,
 } from "../../services/plugins/plugin-thread-events.js";
 import { toThreadQueuedMessage } from "../../services/threads/thread-queued-messages.js";
-import { retryFailedTurn } from "../../services/threads/turn-retry.js";
+import {
+  cancelRetriesForExplicitStop,
+  retryFailedTurn,
+} from "../../services/threads/turn-retry.js";
 import {
   requireConnectedHostSession,
   requirePublicThread,
@@ -334,8 +337,9 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
       thread,
     });
     teleports(deps).abandon(thread.id);
+    const cancelledRetries = cancelRetriesForExplicitStop(deps, thread.id);
     await stopThreadForCurrentState(deps, thread, environment);
-    return context.json({ ok: true });
+    return context.json({ ok: true, cancelledRetries });
   });
 
   post(routes.compact, async (context) => {
@@ -502,7 +506,12 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
 
   post(routes.move, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    const result = await moveThreadToProject(deps, thread.id, payload.projectId);
+    const result = await moveThreadToProject(
+      deps,
+      thread.id,
+      payload.projectId,
+      "local",
+    );
     return context.json({
       ...result,
       thread: toThreadResponseFromThread(deps, { thread: result.thread }),

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { StoryCard, StoryRow } from "../../apps/app/.ladle/story-card.js";
 import { ProviderUsageStatusContent, type UsageStoreSnapshot } from "./app.js";
+import { fromAgentsAndHours, type PlanSummary } from "./plan-usage.js";
 import { UsageSettingsContent } from "./settings.js";
 import type {
   ProviderUsage,
@@ -227,13 +228,20 @@ function SettingsPreview({ scenario }: { scenario: ScenarioName }) {
   );
 }
 
-function FooterPreview({ scenario }: { scenario: ScenarioName }) {
+function FooterPreview({
+  scenario,
+  plan = null,
+}: {
+  scenario: ScenarioName;
+  plan?: PlanSummary | null;
+}) {
   return (
     <div className="w-[303px] overflow-hidden rounded-xl border border-sidebar-border bg-sidebar text-sidebar-foreground">
       <ProviderUsageStatusContent
         dismiss={() => {}}
         snapshot={storySnapshot(scenario)}
         threadMachineId={null}
+        plan={plan}
         refreshEnabled={false}
       />
     </div>
@@ -283,6 +291,26 @@ export function Disclosure() {
       {storyRows.map(({ label, scenario }) => (
         <StoryRow key={scenario} label={label} hint={descriptions[scenario]}>
           <FooterPreview scenario={scenario} />
+        </StoryRow>
+      ))}
+    </StoryCard>
+  );
+}
+
+const plans = [
+  { plan: "free", agents: 31, agentsLimit: 50, cpuHours: 41, cpuHoursLimit: 50 },
+  { plan: "pro", agents: 412, agentsLimit: Number.MAX_SAFE_INTEGER, cpuHours: 114, cpuHoursLimit: 300 },
+  { plan: "business", agents: 980, agentsLimit: Number.MAX_SAFE_INTEGER, cpuHours: 445, cpuHoursLimit: 450 },
+  { plan: "super", agents: 1_240, agentsLimit: Number.MAX_SAFE_INTEGER, cpuHours: 812, cpuHoursLimit: 900 },
+  { plan: "ultra", agents: 2_310, agentsLimit: Number.MAX_SAFE_INTEGER, cpuHours: 640, cpuHoursLimit: 3_000 },
+];
+
+export function CloudroomPlan() {
+  return (
+    <StoryCard labelWidth="180px">
+      {plans.map((usage) => (
+        <StoryRow key={usage.plan} label={usage.plan} hint="Last 30 days. Paid plans have unlimited cloud agents.">
+          <FooterPreview scenario="local" plan={fromAgentsAndHours(usage)} />
         </StoryRow>
       ))}
     </StoryCard>

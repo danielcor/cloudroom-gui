@@ -1,13 +1,22 @@
 import { eq } from "drizzle-orm";
-import { getEnvironment, getThread, listEvents, threads } from "@cloudroom/db";
+import {
+  createThread,
+  getEnvironment,
+  getThread,
+  listEvents,
+  threads,
+} from "@cloudroom/db";
 import {
   encodeClientTurnRequestIdNumber,
   threadScope,
   type PromptInput,
 } from "@cloudroom/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { cloudroom } from "../../src/services/cloudroom/commands.js";
+import { setMacAccess } from "../../src/services/cloudroom/previews.js";
 import { validatePromptAttachmentReferences } from "../../src/services/projects/attachments.js";
 import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
+import { moveThreadToProject } from "../../src/services/threads/thread-move.js";
 import {
   reportQueuedCommandSuccess,
   waitForQueuedCommand,
@@ -84,6 +93,44 @@ function move(harness: TestAppHarness, threadId: string, projectId: string) {
   });
 }
 
+function seedCloudThread(harness: TestAppHarness, status: "idle" | "active") {
+  const { host } = seedHostSession(harness.deps);
+  const { project: from } = seedProjectWithSource(harness.deps, {
+    hostId: host.id,
+    name: "app",
+    path: "/tmp/move-from",
+  });
+  const { project: to } = seedProjectWithSource(harness.deps, {
+    hostId: host.id,
+    name: "keys",
+    path: "/tmp/move-to",
+  });
+  const thread = createThread(harness.db, harness.hub, {
+    projectId: from.id,
+    executionTarget: "cloud",
+    providerId: "codex",
+    status,
+  });
+  const moveProject = vi
+    .spyOn(cloudroom(harness.deps), "moveProject")
+    .mockResolvedValue(null);
+  return { thread, from, to, moveProject };
+}
+
+function refusedMoves(harness: TestAppHarness, threadId: string) {
+  return listEvents(harness.db, { threadId }).filter((event) => {
+    const data = JSON.parse(event.data) as {
+      operation?: string;
+      status?: string;
+    };
+    return (
+      event.type === "system/operation" &&
+      data.operation === "thread_move" &&
+      data.status === "failed"
+    );
+  });
+}
+
 async function releaseOldRuntime(harness: TestAppHarness, threadId: string) {
   const stop = await waitForQueuedCommand(
     harness,
@@ -157,6 +204,56 @@ describe("thread move", () => {
       await releaseOldRuntime(harness, thread.id);
       await ready;
       expect(getThread(harness.db, thread.id)?.projectId).toBe(to.id);
+    });
+  });
+
+  it("runs a Cloud agent's own move only while Mac access is Full", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread, from, to, moveProject } = seedCloudThread(
+        harness,
+        "idle",
+      );
+      const moveRequest = cloudroom(harness.deps).moveRequest!;
+
+      moveRequest(thread.id, to.id);
+      await vi.waitFor(() =>
+        expect(refusedMoves(harness, thread.id)).toHaveLength(1),
+      );
+      expect(moveProject).not.toHaveBeenCalled();
+      expect(getThread(harness.db, thread.id)?.projectId).toBe(from.id);
+
+      await setMacAccess(harness.deps, "full");
+      moveRequest(thread.id, to.id);
+      await vi.waitFor(() => expect(moveProject).toHaveBeenCalledTimes(1));
+      expect(moveProject.mock.calls[0]![1]).toBe(to.id);
+    });
+  });
+
+  it("checks a queued Cloud agent move again when its turn ends", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread, to, moveProject } = seedCloudThread(harness, "active");
+      await setMacAccess(harness.deps, "full");
+
+      const queued = await moveThreadToProject(
+        harness.deps,
+        thread.id,
+        to.id,
+        "cloud-agent",
+      );
+      expect(queued.moved).toBe(false);
+      await setMacAccess(harness.deps, "off");
+      harness.db
+        .update(threads)
+        .set({ status: "idle" })
+        .where(eq(threads.id, thread.id))
+        .run();
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(moveProject).not.toHaveBeenCalled();
+      expect(refusedMoves(harness, thread.id)).toHaveLength(1);
     });
   });
 });

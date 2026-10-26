@@ -1326,7 +1326,10 @@ describe("plugin bb.sdk against a running server", () => {
       await reportQueuedCommandSuccess(server, stop, {
         providerCheckpointId: null,
       });
-      await expect(stopPromise).resolves.toEqual({ ok: true });
+      await expect(stopPromise).resolves.toEqual({
+        ok: true,
+        cancelledRetries: 0,
+      });
     } finally {
       await server.pluginService.stop();
       await rm(workDir, { recursive: true, force: true });

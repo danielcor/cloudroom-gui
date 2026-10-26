@@ -38,7 +38,7 @@ import { noteActiveMinute, timeInApp } from "./time-in-app.js";
 import { activation } from "./activation.js";
 import { disconnectGithub, githubAccount, githubAuth } from "./github-login.js";
 import { addGithubRepo, githubBranches, repoSuggestions } from "./repo-suggestions.js";
-import { ACTIVATION_STEPS, SETUP_ACTIONS, SETUP_AGENTS, SETUP_DETAILS, SETUP_STEPS, UPGRADE_PROMPTS } from "../system/telemetry.js";
+import { ACTIVATION_STEPS, SETUP_ACTIONS, SETUP_AGENTS, SETUP_DETAILS, SETUP_STEPS, STARTER_PROMPTS, UPGRADE_PROMPTS } from "../system/telemetry.js";
 
 const SAFE_SETTINGS_SEARCH = /^(?=.{2,40}$)\p{L}+(?: \p{L}+){0,3}$/u;
 
@@ -139,7 +139,13 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   });
   app.get("/api/v1/cloudroom/activation", async (context) => context.json(await activation(deps)));
   app.post("/api/v1/cloudroom/activation", async (context) => {
-    const parsed = z.object({ step: z.enum(ACTIVATION_STEPS), action: z.enum(["clicked", "hidden"]).default("clicked") }).strict().safeParse(await context.req.json().catch(() => null));
+    const body = await context.req.json().catch(() => null);
+    const starter = z.object({ starter: z.enum(STARTER_PROMPTS) }).strict().safeParse(body);
+    if (starter.success) {
+      deps.telemetry.capture({ name: "starter_prompt", properties: starter.data });
+      return context.json({ ok: true });
+    }
+    const parsed = z.object({ step: z.enum(ACTIVATION_STEPS), action: z.enum(["clicked", "hidden"]).default("clicked") }).strict().safeParse(body);
     if (!parsed.success) throw new ApiError(400, "invalid_activation_step", "Invalid checklist step.");
     deps.telemetry.capture({ name: "activation_step", properties: parsed.data });
     return context.json({ ok: true });

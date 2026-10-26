@@ -496,7 +496,7 @@ export class SandboxDirectory {
     return z.object({ sent: z.boolean() }).parse(await this.call({}, "usage-request"));
   }
 
-  /** The member's friend invite codes. `create` makes one more, up to 3 for life (ADR 0169). `waiting` is the waitlist size, or null. */
+  /** The member's friend invite codes. `create` makes one more (ADR 0169). */
   async invites(action: "list" | "create") {
     const value = await this.call({ action }, "invites");
     const joined = z.object({ name: z.string().nullable(), at: z.string() }).optional();

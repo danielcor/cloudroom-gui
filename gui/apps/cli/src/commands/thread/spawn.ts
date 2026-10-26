@@ -29,6 +29,7 @@ import {
 import {
   parsePermissionMode,
   buildPromptInputs,
+  requirePromptContent,
   uploadClientAttachmentInputs,
   PERMISSION_MODE_HELP,
   PLAN_HELP,
@@ -402,6 +403,13 @@ export function registerSpawnCommand(
     )
     .action(
       action(async (opts: ThreadSpawnCommandOptions) => {
+        if (opts.originKind === undefined) {
+          requirePromptContent({
+            message: opts.prompt,
+            files: opts.file,
+            images: opts.image,
+          });
+        }
         const projectId = resolveExplicitIdFlag({
           flagName: "--project flag",
           value: opts.project,

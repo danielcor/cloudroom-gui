@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 125
+
+One-click security scans (2026-10-26)
+
+### Changes
+
+- New users get one-click security scans under the message box. Turn on "Always show one-click prompts" in Appearance to keep them.
+- The usage panel shows your Cloudroom plan next to your other providers.
+- The Loops page has new cards, a repo menu, and opens instantly.
+- Settings has one clean account menu at the bottom, and the Advanced section is gone.
+- A quick second message in a new Cloud thread no longer shows up twice.
+- Stopping a thread also cancels its pending retries.
+- Security fixes.
+
 ## 124
 
 A checklist for your first week (2026-10-25)

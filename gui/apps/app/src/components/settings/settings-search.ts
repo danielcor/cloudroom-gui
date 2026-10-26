@@ -115,6 +115,7 @@ const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     ["Fade inactive splits", "dim split panes"],
     ["Sidebar footer", "buttons reorder"],
     ["Question cards", "agent questions ask"],
+    ["Always show one-click prompts", "starter prompts new thread security pills"],
   ]),
   ...entries("keyboard", undefined, [
     ["Keyboard shortcuts", "hotkeys keybindings keys"],

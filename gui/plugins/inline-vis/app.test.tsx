@@ -1,11 +1,29 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
 
 afterEach(cleanup);
+
+async function findFrame(container: HTMLElement): Promise<HTMLIFrameElement> {
+  return waitFor(() => {
+    const el = container.querySelector("iframe");
+    if (!(el instanceof HTMLIFrameElement)) {
+      throw new Error("Expected the inline visualization iframe to render");
+    }
+    return el;
+  });
+}
+
+function postFromFrame(iframe: HTMLIFrameElement, data: unknown) {
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", { data, source: iframe.contentWindow }),
+    );
+  });
+}
 
 const message = {
   id: "msg_1",
@@ -81,7 +99,7 @@ describe("InlineVisDirective", () => {
     ]);
   });
 
-  it("uses the sidebar worktree route with an opaque-origin script sandbox", async () => {
+  it("renders workspace HTML in an opaque-origin frame with the theme and base URL", async () => {
     const openWorkspaceFile = vi.fn(() => true);
     const slot = renderSlot(
       app.messageDirectives[0]!,
@@ -102,6 +120,7 @@ describe("InlineVisDirective", () => {
               kind: "html",
               file: "charts/demo file.html",
               source: "workspace",
+              content: "<p>Chart</p>",
             };
           },
         },
@@ -111,35 +130,23 @@ describe("InlineVisDirective", () => {
     await slot.findByRole("status", {
       name: "Loading visualization charts/demo file.html",
     });
-
-    const iframe = await waitFor(() => {
-      const el = slot.container.querySelector("iframe");
-      expect(el).toBeTruthy();
-      return el as HTMLIFrameElement;
-    });
+    const iframe = await findFrame(slot.container);
 
     expect(iframe.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(iframe.getAttribute("sandbox")).not.toContain("allow-same-origin");
-    expect(iframe.getAttribute("src")).toBe(
-      "/api/v1/threads/thr_1/worktree/files/charts/demo%20file.html",
+    expect(iframe.getAttribute("src")).toBeNull();
+    const srcDoc = iframe.getAttribute("srcdoc")!;
+    expect(srcDoc).toContain(
+      '<base href="http://localhost:3000/api/v1/threads/thr_1/worktree/files/charts/demo%20file.html">',
     );
-    expect(iframe.getAttribute("srcdoc")).toBeNull();
-    expect(iframe.style.height).toBe("224px");
+    expect(srcDoc).toContain('<style id="inline-vis-theme">:root{');
+    expect(srcDoc.endsWith("<p>Chart</p>")).toBe(true);
+    expect(iframe.parentElement!.style.height).toBe("224px");
     fireEvent.click(
       slot.getByRole("button", {
         name: "Open charts/demo file.html in sidebar",
       }),
     );
     expect(openWorkspaceFile).toHaveBeenCalledWith("charts/demo file.html");
-    expect(slot.rpcCalls).toEqual([
-      {
-        method: "preparePreview",
-        input: {
-          threadId: "thr_1",
-          file: "charts/demo file.html",
-        },
-      },
-    ]);
   });
 
   it("uses the thread-storage route without a workspace action", async () => {
@@ -158,44 +165,31 @@ describe("InlineVisDirective", () => {
       },
       {
         rpc: {
-          preparePreview: (input) => {
-            expect(input).toEqual({
-              threadId: "thr_1",
-              file: "reports/result file.html",
-              source: "thread-storage",
-            });
-            return {
-              kind: "html",
-              file: "reports/result file.html",
-              source: "thread-storage",
-            };
-          },
+          preparePreview: () => ({
+            kind: "html",
+            file: "reports/result file.html",
+            source: "thread-storage",
+            content: "<p>Report</p>",
+          }),
         },
       },
     );
 
-    const iframe = await waitFor(() => {
-      const el = slot.container.querySelector("iframe");
-      expect(el).toBeTruthy();
-      return el as HTMLIFrameElement;
-    });
-
-    expect(iframe.getAttribute("src")).toBe(
-      "/api/v1/threads/thr_1/thread-storage/files/reports/result%20file.html",
+    const iframe = await findFrame(slot.container);
+    expect(iframe.getAttribute("srcdoc")).toContain(
+      '<base href="http://localhost:3000/api/v1/threads/thr_1/thread-storage/files/reports/result%20file.html">',
     );
-    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts");
     expect(
       slot.queryByRole("button", { name: /open .* in sidebar/i }),
     ).toBeNull();
-    expect(openWorkspaceFile).not.toHaveBeenCalled();
   });
 
-  it("uses an optional bounded height attribute", async () => {
+  it("fits the frame to the page height, capped by the height attribute", async () => {
     const slot = renderSlot(
       app.messageDirectives[0]!,
       {
-        attributes: { file: "demo.html", height: "480" },
-        source: '::inline-vis{file="demo.html" height="480"}',
+        attributes: { file: "fit.html", height: "480" },
+        source: '::inline-vis{file="fit.html" height="480"}',
         message,
         openWorkspaceFile: null,
       },
@@ -203,81 +197,63 @@ describe("InlineVisDirective", () => {
         rpc: {
           preparePreview: () => ({
             kind: "html",
-            file: "demo.html",
+            file: "fit.html",
             source: "workspace",
+            content: "<p>Chart</p>",
           }),
         },
       },
     );
 
-    const iframe = await waitFor(() => {
-      const el = slot.container.querySelector("iframe");
-      expect(el).toBeTruthy();
-      return el as HTMLIFrameElement;
-    });
-    expect(iframe.style.height).toBe("480px");
+    const iframe = await findFrame(slot.container);
+    const box = iframe.parentElement!;
+    expect(box.style.height).toBe("480px");
+
+    postFromFrame(iframe, { type: "inline-vis:size", height: 312.4 });
+    await waitFor(() => expect(box.style.height).toBe("313px"));
+    postFromFrame(iframe, { type: "inline-vis:size", height: 900 });
+    await waitFor(() => expect(box.style.height).toBe("480px"));
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "inline-vis:size", height: 200 },
+      }),
+    );
+    expect(box.style.height).toBe("480px");
   });
 
-  it("reserves the preview height while loading so the timeline does not jump", async () => {
-    type HtmlPreview = {
-      kind: "html";
-      file: string;
-      source: "workspace" | "thread-storage";
-    };
-    let resolvePreview = (_result: HtmlPreview) => {};
-    const pendingPreview = new Promise<HtmlPreview>((resolve) => {
-      resolvePreview = resolve;
-    });
+  it("opens links only for a focused frame", async () => {
     const slot = renderSlot(
       app.messageDirectives[0]!,
       {
-        attributes: { file: "demo.html", height: "480" },
-        source: '::inline-vis{file="demo.html" height="480"}',
+        attributes: { file: "links.html" },
+        source: '::inline-vis{file="links.html"}',
         message,
-        openWorkspaceFile: vi.fn(() => true),
+        openWorkspaceFile: null,
       },
       {
         rpc: {
-          preparePreview: () => pendingPreview,
+          preparePreview: () => ({
+            kind: "html",
+            file: "links.html",
+            source: "workspace",
+            content: '<a href="https://example.com">PR</a>',
+          }),
         },
+        openUrl: () => true,
       },
     );
 
-    const loading = await waitFor(() => {
-      const el = slot.container.querySelector('[aria-busy="true"]');
-      if (!(el instanceof HTMLElement)) {
-        throw new Error("Expected the inline visualization loader to render");
-      }
-      return el;
-    });
-    expect(loading.style.height).toBe("480px");
-    expect(
-      slot.getByRole("status", { name: "Loading visualization demo.html" }),
-    ).toBe(loading);
-    const loadingCard = loading.parentElement!;
-    const loadingHeader = loadingCard.firstElementChild!;
-    const loadingHeaderHtml = loadingHeader.outerHTML;
+    const iframe = await findFrame(slot.container);
+    const link = { type: "inline-vis:open", url: "https://example.com/" };
+    postFromFrame(iframe, link);
+    expect(slot.navigateCalls).toEqual([]);
 
-    resolvePreview({ kind: "html", file: "demo.html", source: "workspace" });
-
-    const iframe = await waitFor(() => {
-      const el = slot.container.querySelector("iframe");
-      if (!(el instanceof HTMLIFrameElement)) {
-        throw new Error("Expected the inline visualization iframe to render");
-      }
-      return el;
-    });
-    expect(iframe.style.height).toBe("480px");
-    expect(slot.queryByRole("status")).toBeNull();
-
-    const readyCard = iframe.parentElement!;
-    expect(readyCard.className).toBe(loadingCard.className);
-    const readyHeader = readyCard.firstElementChild!;
-    expect(readyHeader.className).toBe(loadingHeader.className);
-    expect(readyHeader.lastElementChild!.classList.contains("size-5")).toBe(
-      true,
-    );
-    expect(loadingHeaderHtml).toContain("size-5");
+    iframe.tabIndex = 0;
+    iframe.focus();
+    postFromFrame(iframe, link);
+    expect(slot.navigateCalls).toEqual([
+      { method: "openUrl", url: "https://example.com/" },
+    ]);
   });
 
   it("renders a Markdown document with the host renderer and no iframe", async () => {
@@ -441,7 +417,7 @@ describe("InlineVisDirective", () => {
     );
 
     expect((await slot.findByRole("alert")).textContent).toMatch(
-      /whole number from 120 to 1200 pixels/i,
+      /whole number from 120 to 2000 pixels/i,
     );
     expect(slot.container.querySelector("iframe")).toBeNull();
     expect(slot.rpcCalls).toEqual([]);

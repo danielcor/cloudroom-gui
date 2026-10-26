@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompactViewportOverrideProvider } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
@@ -134,14 +135,19 @@ describe("AutomationOverviewView", () => {
 
     const rowTitles = () =>
       Array.from(
-        container.querySelectorAll<HTMLElement>("[data-resource-row]"),
+        container.querySelectorAll<HTMLElement>("[data-loop-card]"),
         (row) =>
           row.querySelector("button:not([data-row-action])")?.textContent,
       );
+    const show = (scope: RegExp) =>
+      fireEvent.click(screen.getByRole("button", { name: scope }));
     expect(rowTitles()).toEqual([
       "Aardvark pending",
       "Alpha active",
       "Zulu active",
+    ]);
+    show(/^Off/);
+    expect(rowTitles()).toEqual([
       "Alpha inactive",
       "Zulu inactive",
       "Aardvark completed",
@@ -152,12 +158,16 @@ describe("AutomationOverviewView", () => {
     );
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Loop name" }));
     expect(rowTitles()).toEqual([
-      "Alpha active",
-      "Zulu active",
-      "Aardvark pending",
       "Alpha inactive",
       "Zulu inactive",
       "Aardvark completed",
+    ]);
+    fireEvent.keyDown(document, { key: "Escape" });
+    show(/^All/);
+    expect(rowTitles()).toEqual([
+      "Alpha active",
+      "Zulu active",
+      "Aardvark pending",
     ]);
   });
 
@@ -242,13 +252,6 @@ describe("AutomationOverviewView", () => {
     expect(screen.getByText("Unreadable automation")).toBeTruthy();
 
     fireEvent.change(search, { target: { value: "" } });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Active" }));
-    expect(screen.getByText("Needs a prompt")).toBeTruthy();
-    expect(screen.queryByText("Unreadable automation")).toBeNull();
-    expect(screen.getByText("Nightly digest")).toBeTruthy();
-
-    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(onOpenDetail).toHaveBeenCalledWith(
       { projectId: "proj_1", automationId: "auto_repair" },
@@ -257,10 +260,26 @@ describe("AutomationOverviewView", () => {
     expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(1);
   });
 
-  it("offers Projects and Status as groups inside one filter menu", async () => {
+  it("groups running loops by repo in the side menu and keeps paused ones under Off", () => {
+    const base = INSTALLED_AUTOMATIONS[0]!;
+    if ("problem" in base.automation) throw new Error("Expected a loop");
+    const loop = (
+      id: string,
+      projectId: string,
+      name: string,
+      enabled = true,
+    ) => ({
+      automation: { ...base.automation, id, projectId, name, enabled },
+      project: { id: projectId, name: projectId === "proj_1" ? "bb" : "notes" },
+    });
     render(
       <AutomationOverviewView
-        entries={INSTALLED_AUTOMATIONS}
+        entries={[
+          loop("auto_1", "proj_1", "Nightly digest"),
+          loop("auto_2", "proj_1", "Weekly report"),
+          loop("auto_3", "proj_2", "Notes sync"),
+          loop("auto_4", "proj_2", "Old cleanup", false),
+        ]}
         error={null}
         onRetry={() => {}}
         onOpenDetail={() => {}}
@@ -269,149 +288,36 @@ describe("AutomationOverviewView", () => {
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
+        templates={{
+          projects: [
+            { id: "proj_1", name: "bb", path: null, github: "acme/bb-app" },
+            { id: "proj_2", name: "notes", path: null, github: null },
+          ],
+          onAdd: async () => {},
+          locked: false,
+          onUpgrade: () => {},
+        }}
       />,
     );
-
-    expect(screen.queryByRole("button", { name: "Projects" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Status" })).toBeNull();
-    const filtersTrigger = screen.getByRole("button", { name: "Filters" });
-    fireEvent.focus(filtersTrigger);
-    expect((await screen.findByRole("tooltip")).textContent).toBe(
-      "Filters: All",
-    );
-    fireEvent.blur(filtersTrigger);
-    fireEvent.pointerDown(filtersTrigger);
-
-    expect(screen.getByRole("menu", { name: "Filters" })).toBeTruthy();
-    expect(screen.getByText("Projects")).toBeTruthy();
-    expect(screen.getByText("Status")).toBeTruthy();
-
-    const projectOption = screen.getByRole("menuitemcheckbox", { name: "bb" });
-    expect(projectOption.querySelector("[data-icon]")).toBeNull();
+    const menu = screen.getByRole("navigation", { name: "Repos" });
+    const item = (name: RegExp) => within(menu).getByRole("button", { name });
+    expect(item(/^All3$/)).toBeTruthy();
     expect(
-      projectOption.querySelector(".truncate")?.getAttribute("title"),
-    ).toBe("bb");
-    const activeOption = screen.getByRole("menuitemcheckbox", {
-      name: "Active",
-    });
-    const pausedOption = screen.getByRole("menuitemcheckbox", {
-      name: "Paused",
-    });
-    expect(activeOption.querySelector("[data-icon]")).toBeNull();
-    expect(pausedOption.querySelector("[data-icon]")).toBeNull();
-  });
-
-  it("keeps project and status selections independent in the merged menu", () => {
-    const { container } = render(
-      <AutomationOverviewView
-        entries={INSTALLED_AUTOMATIONS}
-        error={null}
-        onRetry={() => {}}
-        onOpenDetail={() => {}}
-        onEnabledChange={async () => {}}
-        onPriorityChange={async () => {}}
-        onCreateViaChat={() => {}}
-        activeMode="installed"
-        onModeChange={() => {}}
-      />,
-    );
-    const rowTitles = () =>
-      Array.from(
-        container.querySelectorAll<HTMLElement>("[data-resource-row]"),
-        (row) =>
-          row.querySelector("button:not([data-row-action])")?.textContent,
-      );
-
-    expect(rowTitles()).toEqual(["Nightly digest"]);
-
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "bb" }));
-    expect(
-      screen.getByRole("menuitemcheckbox", { name: "bb" }).ariaChecked,
-    ).toBe("true");
-    expect(rowTitles()).toEqual(["Nightly digest"]);
-
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Paused" }));
-    expect(
-      screen.getByRole("menuitemcheckbox", { name: "bb" }).ariaChecked,
-    ).toBe("true");
-    expect(
-      screen.getByRole("menuitemcheckbox", { name: "Paused" }).ariaChecked,
-    ).toBe("true");
-    expect(
-      screen.getByRole("menuitemcheckbox", { name: "Active" }).ariaChecked,
-    ).toBe("false");
-    expect(rowTitles()).toEqual([]);
-    expect(screen.getByText("No loops match these filters.")).toBeTruthy();
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(
-      screen.getByRole("button", {
-        name: "Filters: Projects: bb; Status: Paused",
-      }),
+      item(/^bb-app2$/).querySelector('[data-icon="GithubLogo"]'),
     ).toBeTruthy();
+    expect(item(/^notes1$/).querySelector('[data-icon="Laptop"]')).toBeTruthy();
+    expect(item(/^Off1$/)).toBeTruthy();
+    expect(screen.queryByText("Old cleanup")).toBeNull();
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: /^Filters/ }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Paused" }));
-    expect(
-      screen.getByRole("menuitemcheckbox", { name: "bb" }).ariaChecked,
-    ).toBe("true");
-    expect(rowTitles()).toEqual(["Nightly digest"]);
-    expect(screen.queryByText("No loops match these filters.")).toBeNull();
-  });
+    fireEvent.click(item(/^notes/));
+    expect(item(/^notes/).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Notes sync")).toBeTruthy();
+    expect(screen.queryByText("Nightly digest")).toBeNull();
+    expect(screen.getByText("1 loop running")).toBeTruthy();
 
-  it("gives filter and sort triggers the same resting, open, and engaged states", () => {
-    const { container } = render(
-      <AutomationOverviewView
-        entries={INSTALLED_AUTOMATIONS}
-        error={null}
-        onRetry={() => {}}
-        onOpenDetail={() => {}}
-        onEnabledChange={async () => {}}
-        onPriorityChange={async () => {}}
-        onCreateViaChat={() => {}}
-        activeMode="installed"
-        onModeChange={() => {}}
-      />,
-    );
-
-    const ENGAGED = ["bg-state-active", "text-foreground"];
-    const classesOf = (el: HTMLElement) => new Set(el.className.split(/\s+/));
-    const isEngaged = (el: HTMLElement) => {
-      const classes = classesOf(el);
-      return ENGAGED.every((engagedClass) => classes.has(engagedClass));
-    };
-    const byLabel = (prefix: string) => {
-      const el = container.querySelector<HTMLElement>(
-        `button[aria-label^="${prefix}"]`,
-      );
-      if (el === null) throw new Error(`no trigger labelled ${prefix}`);
-      return el;
-    };
-    const filters = () => byLabel("Filters");
-    const sort = () => byLabel("Sort:");
-
-    for (const trigger of [filters(), sort()]) {
-      expect(isEngaged(trigger)).toBe(false);
-      expect(classesOf(trigger).has("bg-state-active")).toBe(false);
-    }
-
-    fireEvent.pointerDown(filters());
-    expect(isEngaged(filters())).toBe(true);
-    expect(isEngaged(sort())).toBe(false);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(isEngaged(filters())).toBe(false);
-
-    fireEvent.pointerDown(sort());
-    expect(isEngaged(sort())).toBe(true);
-    expect(isEngaged(filters())).toBe(false);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(isEngaged(sort())).toBe(false);
-
-    fireEvent.pointerDown(filters());
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "bb" }));
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(isEngaged(filters())).toBe(true);
+    fireEvent.click(item(/^Off/));
+    expect(screen.getByText("Old cleanup")).toBeTruthy();
+    expect(screen.queryByText("Notes sync")).toBeNull();
   });
 
   it("uses compact, icon-free sort options and preserves disabled state", () => {
@@ -554,17 +460,17 @@ describe("AutomationOverviewView", () => {
     );
 
     const row = (name: string) =>
-      screen.getByText(name).closest<HTMLElement>("[data-resource-row]")!;
+      screen.getByText(name).closest<HTMLElement>("[data-loop-card]")!;
     const digest = row("Nightly digest");
-    expect(digest.textContent).toContain("Claude Code·Opus 5·Medium");
+    expect(digest.textContent).toContain("Opus 5·Medium");
     expect(digest.textContent).toContain("9AM");
     expect(digest.textContent).toMatch(/in \d+d/);
     expect(digest.querySelector('[aria-label^="Priority 3 "]')).toBeTruthy();
     expect(row("Security sweep").textContent).toContain(
-      "Codex ⇄ Claude Code·GPT-6.1 Sol ⇄ Opus 5.5 (1M)·Max",
+      "GPT-6.1 Sol ⇄ Opus 5.5 (1M)·Max",
     );
     expect(row("Plain script").textContent).toContain("Script");
-    expect(screen.getAllByText("bb")).toHaveLength(3);
+    expect(screen.getAllByText("bb")).toHaveLength(1);
     expect(screen.getByText("3 loops running")).toBeTruthy();
   });
 
@@ -596,7 +502,7 @@ describe("AutomationOverviewView", () => {
       />,
     );
     const icon = screen.getByRole("img", { name: "Project: Personal" });
-    expect(icon.querySelector('[data-icon="Folder"]')).not.toBeNull();
+    expect(icon.querySelector('[data-icon="Laptop"]')).not.toBeNull();
     expect(icon.parentElement?.textContent).toBe("Personal");
     fireEvent.change(screen.getByPlaceholderText("Search loops"), {
       target: { value: "Personal" },
@@ -638,13 +544,11 @@ describe("AutomationOverviewView", () => {
     );
 
     expect(
-      container.querySelector('[aria-label="Project"] [data-icon="Folder"]'),
-    ).toBeTruthy();
-    expect(
       container.querySelector(
         '[aria-label="Local project"] [data-icon="Laptop"]',
       ),
-    ).toBeNull();
+    ).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "Project: Local" })).toBeNull();
   });
   it("shows each loop's saved priority, saves a new one, and drops a failed pick", async () => {
     const base = INSTALLED_AUTOMATIONS[0]!;
@@ -762,7 +666,7 @@ describe("AutomationOverviewView", () => {
       />,
     );
     const row = (name: string) =>
-      screen.getByText(name).closest<HTMLElement>("[data-resource-row]")!;
+      screen.getByText(name).closest<HTMLElement>("[data-loop-card]")!;
     expect(row("Broken sync").textContent).toContain("Failed");
     expect(
       row("Broken sync").querySelector('[title="Agent exited with code 1"]'),

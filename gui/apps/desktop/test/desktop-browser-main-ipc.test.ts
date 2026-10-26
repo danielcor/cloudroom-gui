@@ -254,7 +254,7 @@ function oversizedBrowserUrl(): string {
 describe("registerDesktopBrowserIpc", () => {
   it("dispatches valid browser commands only from BrowserWindow-owned senders", () => {
     const manager = new RecordingDesktopBrowserViewManager();
-    registerDesktopBrowserIpc(manager);
+    registerDesktopBrowserIpc(manager, () => true);
     const renderer = createTrustedRenderer("main-window");
     const untrustedSender = createUntrustedSender();
     const attachRequest: BbDesktopBrowserAttachRequest = {
@@ -311,7 +311,7 @@ describe("registerDesktopBrowserIpc", () => {
 
   it("dispatches validated find-in-page requests and rejects malformed ones", () => {
     const manager = new RecordingDesktopBrowserViewManager();
-    registerDesktopBrowserIpc(manager);
+    registerDesktopBrowserIpc(manager, () => true);
     const renderer = createTrustedRenderer("main-window");
     const untrustedSender = createUntrustedSender();
     const findRequest: BbDesktopBrowserFindInPageRequest = {
@@ -369,7 +369,7 @@ describe("registerDesktopBrowserIpc", () => {
 
   it("rejects malformed attach and navigate payloads before manager dispatch", () => {
     const manager = new RecordingDesktopBrowserViewManager();
-    registerDesktopBrowserIpc(manager);
+    registerDesktopBrowserIpc(manager, () => true);
     const renderer = createTrustedRenderer("main-window");
     const validAttachRequest: BbDesktopBrowserAttachRequest = {
       threadId: "thread-1",
@@ -410,7 +410,7 @@ describe("registerDesktopBrowserIpc", () => {
 
   it("rejects malformed bounds, visibility, and tab-command payloads", () => {
     const manager = new RecordingDesktopBrowserViewManager();
-    registerDesktopBrowserIpc(manager);
+    registerDesktopBrowserIpc(manager, () => true);
     const renderer = createTrustedRenderer("main-window");
     const boundsRequest: BbDesktopBrowserSetBoundsRequest = {
       tabId: "browser:a",
@@ -507,5 +507,31 @@ describe("registerDesktopBrowserIpc", () => {
     expect(manager.stopCalls).toEqual([
       { hostWindow: renderer.hostWindow, tabId: "browser:a" },
     ]);
+  });
+
+  it("drops every command when the sender check rejects it", () => {
+    const manager = new RecordingDesktopBrowserViewManager();
+    registerDesktopBrowserIpc(manager, () => false);
+    const renderer = createTrustedRenderer("main-window");
+
+    sendBrowserIpc({
+      channel: BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
+      payload: {
+        threadId: "thread-1",
+        tabId: "browser:a",
+        url: "http://localhost:5173/",
+        bounds: { x: 0, y: 0, width: 800, height: 600 },
+        visible: true,
+      },
+      sender: renderer.sender,
+    });
+    sendBrowserIpc({
+      channel: BB_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
+      payload: { tabId: "browser:a", url: "https://example.com/" },
+      sender: renderer.sender,
+    });
+
+    expect(manager.attachCalls).toEqual([]);
+    expect(manager.navigateCalls).toEqual([]);
   });
 });

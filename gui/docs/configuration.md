@@ -234,7 +234,7 @@ The hook needs Git 2.54 or newer; older Git ignores it. Use
 session after changing it. Cloud threads need a core with `strip_ai_co_authors`
 support.
 
-The **Command Guard** toggle in Settings → Advanced → Command Guard defaults to on. It blocks a
+The **Command Guard** toggle in Settings → Agents → Command Guard defaults to on. It blocks a
 small set of catastrophic shell-command patterns in new Local Codex/Pi/Claude
 Code sessions and Cloud Codex/Pi sessions. Use
 `room-cli settings general commandGuardEnabled <true|false>` or the existing
@@ -919,7 +919,7 @@ while keeping workspace changes.
 
 ## Experiments
 
-Experimental surfaces are changed in Settings → Advanced → Experiments or with
+Experimental surfaces are changed in Settings → Updates → Experiments or with
 `bb settings experiment <key> <true|false>`. All experiments start off.
 The default-off `changelogPreview` experiment shows the latest release notes
 as a compact, dismissible card on Settings → Updates.
@@ -1105,7 +1105,7 @@ A pending retry is a queued row on the thread, not an in-process timer, so it
 survives a restart and shows its reason and time on the queue card above the
 composer — the one surface that narrates the wait. Inspect them with
 `bb provider-retry status`, cancel one on that card or with
-`bb provider-retry cancel <thread-id>`, or run
+`bb provider-retry cancel <thread-id>` (stopping the thread also cancels it), or run
 `bb provider-retry retry <thread-id>` to send it now instead of waiting. Limits
 that do not reset on a clock — credit and spend-control exhaustion — schedule
 nothing, because waiting does not fix them.

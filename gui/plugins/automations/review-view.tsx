@@ -43,6 +43,8 @@ const BOARD_COLUMNS: readonly ReviewItemStatus[] = [
 ];
 
 const DAY_MS = 24 * 60 * 60_000;
+export const OFFSCREEN_ROW_CLASSES =
+  "[content-visibility:auto] [contain-intrinsic-size:auto_96px]";
 
 export function reviewableItems(items: readonly ReviewItem[]): ReviewItem[] {
   return items.filter(
@@ -178,6 +180,7 @@ function ReviewTimelineRow({
     <li
       className={cn(
         "group relative grid grid-cols-[4.5rem_1.5rem_minmax(0,1fr)_auto] items-start gap-x-1 rounded-sm py-2.5 pr-2",
+        OFFSCREEN_ROW_CLASSES,
         openable(item) && "cursor-pointer hover:bg-state-hover",
         item.reviewedAt !== null && "opacity-55",
       )}
@@ -281,6 +284,7 @@ function ReviewCard({
     <li
       className={cn(
         "rounded-md border border-border bg-background p-3",
+        OFFSCREEN_ROW_CLASSES,
         openable(item) && "cursor-pointer hover:border-foreground/25",
         item.reviewedAt !== null && "opacity-55",
       )}

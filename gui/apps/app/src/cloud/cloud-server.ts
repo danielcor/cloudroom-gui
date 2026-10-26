@@ -496,7 +496,7 @@ class CloudServer {
     if (thread && thread[2] === "/stop") {
       await cloudApi.stop(thread[1]);
       this.thread(thread[1]).listenIfLoaded();
-      return empty();
+      return json({ ok: true, cancelledRetries: 0 });
     }
     if (thread && thread[2] === "/tabs" && request.method === "PUT") {
       const body = object(await request.json().catch(() => null));

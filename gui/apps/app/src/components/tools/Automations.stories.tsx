@@ -273,17 +273,16 @@ export function OverviewRows() {
   };
   return (
     <StoryCard>
-      {OVERVIEW_ENTRIES.map(({ automation: value, project }) => (
+      {OVERVIEW_ENTRIES.map(({ automation: value }) => (
         <StoryRow
           key={value.id}
           label={descriptions[value.id]?.label ?? value.name}
           hint={descriptions[value.id]?.hint}
         >
           {"execution" in value ? (
-            <div className="w-full max-w-3xl">
+            <div className="w-full max-w-md">
               <OverviewRow
                 automation={value}
-                project={project}
                 scriptAgents={undefined}
                 providers={[]}
                 now={Date.now()}
@@ -298,10 +297,9 @@ export function OverviewRows() {
         label="Script automation"
         hint="Shows the agents the script starts, or Script when it starts none. The schedule and toggle use the same row layout."
       >
-        <div className="w-full max-w-3xl">
+        <div className="w-full max-w-md">
           <OverviewRow
             automation={SCRIPT_AUTOMATION}
-            project={{ id: "proj_personal", name: "Personal" }}
             scriptAgents={[]}
             providers={[]}
             now={Date.now()}

@@ -28,6 +28,20 @@ export const PERMISSION_MODE_HELP =
 export const PLAN_HELP =
   "Send the message as the provider's /plan action so the agent proposes a plan for approval before executing";
 
+export function requirePromptContent(args: {
+  message: string;
+  files?: readonly string[];
+  images?: readonly string[];
+}): void {
+  if (
+    args.message.trim() === "" &&
+    !args.files?.length &&
+    !args.images?.length
+  ) {
+    throw new Error("The prompt is empty; check the command that builds it.");
+  }
+}
+
 export function buildPromptInputs(args: {
   message: string;
   files?: readonly string[];

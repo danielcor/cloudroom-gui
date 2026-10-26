@@ -387,7 +387,13 @@ function AppHeader({
     </>
   ) : null;
 
-  return <AppPageHeader center={center} actions={actions} />;
+  return (
+    <AppPageHeader
+      center={center}
+      actions={actions}
+      className={pluginPanel ? "border-b-0" : undefined}
+    />
+  );
 }
 
 interface AppLayoutProps {

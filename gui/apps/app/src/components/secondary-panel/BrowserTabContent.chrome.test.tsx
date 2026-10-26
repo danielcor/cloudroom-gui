@@ -17,7 +17,16 @@ import {
   createBbDesktopApi,
   createNoopDesktopBrowserApi,
 } from "@/test/bb-desktop-test-utils";
+import { useIsNativeBrowserViewShown } from "@/hooks/useBrowserDimmingModal";
 import { BrowserTabContent } from "./BrowserTabContent";
+
+function NativeBrowserProbe() {
+  return (
+    <span data-testid="native-browser-state">
+      {useIsNativeBrowserViewShown() ? "shown" : "hidden"}
+    </span>
+  );
+}
 
 const desktopInfo = {
   lastCheckedAt: null,
@@ -207,5 +216,21 @@ describe("BrowserTabContent persistent navigation", () => {
     expect(onNativeFocus).not.toHaveBeenCalled();
     act(() => harness.emitNativeFocus("browser:test"));
     expect(onNativeFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the native view as shown so floating cards can step aside", async () => {
+    render(<NativeBrowserProbe />);
+    const state = screen.getByTestId("native-browser-state");
+    expect(state.textContent).toBe("hidden");
+
+    const view = renderBrowserChrome(
+      createBrowserChromeHarness(),
+      "https://example.com/docs",
+      { canHandleBrowserCommands: true, canShowNativeBrowserView: true },
+    );
+    await waitFor(() => expect(state.textContent).toBe("shown"));
+
+    view.unmount();
+    expect(state.textContent).toBe("hidden");
   });
 });

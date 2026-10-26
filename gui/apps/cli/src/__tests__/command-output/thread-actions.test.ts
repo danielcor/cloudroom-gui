@@ -423,7 +423,7 @@ describe("room-cli thread action command output", () => {
         updatedAt: 2,
       }),
     );
-    const stopPost = vi.fn(async () => ({ ok: true }));
+    const stopPost = vi.fn(async () => ({ ok: true, cancelledRetries: 1 }));
     stubServerApi({
       "v1.threads.:id.$get": get,
       "v1.threads.:id.stop.$post": stopPost,
@@ -432,7 +432,7 @@ describe("room-cli thread action command output", () => {
     await runCommand(["thread", "stop", "thread-stop-error"], register);
 
     expect(collectLogLines(vi.mocked(console.log))).toContain(
-      "Thread thread-stop-error stopped",
+      "Thread thread-stop-error stopped; cancelled 1 pending automatic retry",
     );
     expect(get).not.toHaveBeenCalled();
     expect(stopPost).toHaveBeenCalledTimes(1);
@@ -449,7 +449,7 @@ describe("room-cli thread action command output", () => {
         updatedAt: 2,
       }),
     );
-    const stopPost = vi.fn(async () => ({ ok: true }));
+    const stopPost = vi.fn(async () => ({ ok: true, cancelledRetries: 2 }));
     stubServerApi({
       "v1.threads.:id.$get": get,
       "v1.threads.:id.stop.$post": stopPost,
@@ -458,9 +458,22 @@ describe("room-cli thread action command output", () => {
     await runCommand(["thread", "stop", "thread-stop-active"], register);
 
     expect(collectLogLines(vi.mocked(console.log))).toContain(
-      "Thread thread-stop-active stopped",
+      "Thread thread-stop-active stopped; cancelled 2 pending automatic retries",
     );
     expect(stopPost).toHaveBeenCalledTimes(1);
+
+    vi.mocked(console.log).mockClear();
+    await runCommand(
+      ["thread", "stop", "thread-stop-active", "--json"],
+      register,
+    );
+    expect(
+      JSON.parse(collectLogLines(vi.mocked(console.log)).join("\n")),
+    ).toEqual({
+      ok: true,
+      cancelledRetries: 2,
+      threadId: "thread-stop-active",
+    });
   });
 
   it("room-cli thread compact calls the manual compaction endpoint", async () => {

@@ -306,12 +306,18 @@ describe("provider usage footer disclosure", () => {
       name: "Reload provider usage",
     }) as HTMLButtonElement;
     await waitFor(() => expect(reloadButton.disabled).toBe(false));
-    const callsBeforeManualRefresh = fetchMock.mock.calls.length;
+    const usageCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/getUsage"));
+    const planCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => url === "/api/v1/cloudroom/account");
+    const callsBeforeManualRefresh = usageCalls().length;
+    const planCallsBeforeManualRefresh = planCalls().length;
     fireEvent.click(reloadButton);
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeManualRefresh + 1),
+      expect(usageCalls()).toHaveLength(callsBeforeManualRefresh + 1),
     );
-    expect(fetchMock.mock.calls.at(-1)?.[1]).toEqual(
+    expect(planCalls()).toHaveLength(planCallsBeforeManualRefresh + 1);
+    expect(usageCalls().at(-1)?.[1]).toEqual(
       expect.objectContaining({
         body: JSON.stringify({
           force: true,
@@ -325,12 +331,10 @@ describe("provider usage footer disclosure", () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
     window.dispatchEvent(new Event("blur"));
     now.mockReturnValue(5 * 60_000 + 1_001);
-    const callsBeforeFocus = fetchMock.mock.calls.length;
+    const callsBeforeFocus = usageCalls().length;
     window.dispatchEvent(new Event("focus"));
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeFocus + 1),
-    );
-    expect(fetchMock.mock.calls.at(-1)?.[1]).toEqual(
+    await waitFor(() => expect(usageCalls()).toHaveLength(callsBeforeFocus + 1));
+    expect(usageCalls().at(-1)?.[1]).toEqual(
       expect.objectContaining({
         body: JSON.stringify({
           force: false,

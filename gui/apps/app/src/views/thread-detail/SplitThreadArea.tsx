@@ -1001,6 +1001,7 @@ function StandalonePaneContent({
       {panelChrome ? (
         <div className="flex h-full min-h-0 flex-col">
           <AppPageHeader
+            className="border-b-0"
             center={<PluginPanelHeaderCenter chrome={panelChrome} />}
             actions={
               panel ? (

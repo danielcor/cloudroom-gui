@@ -1,6 +1,8 @@
 # Provider usage
 
-Shows usage from enabled usage-source plugins in the sidebar. The card lists every
+Shows usage from enabled usage-source plugins in the sidebar. The card opens with
+the signed-in Cloudroom plan's meters. `plan-usage.ts` adapts the account's usage
+into plain meters, so a new metric such as Cloud credits only needs a new adapter. The card lists every
 provider at once, each with its icon, name, and one thin bar per limit (5h, 7d,
 and any model-scoped window). Pooled accounts stack under their provider. Shared
 sources such as Account Pooler are selected by default; an explicit machine

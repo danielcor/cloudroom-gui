@@ -66,6 +66,13 @@ import { cn } from "@cloudroom/shared-ui/lib/utils";
 const PANEL_PATH = "automations";
 type OverviewEntry = AutomationsOverviewResponse["automations"][number];
 
+const lastLoaded: {
+  entries: OverviewEntry[] | null;
+  review: ReviewResponse | null;
+  plan: string | null | undefined;
+  projects: TemplateProject[] | null;
+} = { entries: null, review: null, plan: undefined, projects: null };
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -124,7 +131,7 @@ function useOverview(): {
   const [state, setState] = useState<{
     entries: OverviewEntry[] | null;
     error: string | null;
-  }>({ entries: null, error: null });
+  }>(() => ({ entries: lastLoaded.entries, error: null }));
   const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestInFlightRef = useRef(false);
   const trailingRefetchRef = useRef(false);
@@ -144,6 +151,7 @@ function useOverview(): {
         .then(
           (result) => {
             const data = result as AutomationsOverviewResponse;
+            lastLoaded.entries = data.automations;
             setState({ entries: data.automations, error: null });
           },
           (error: unknown) =>
@@ -166,8 +174,8 @@ function useOverview(): {
   const refetch = useCallback(() => runRefetch(true), [runRefetch]);
 
   useEffect(() => {
-    refetch();
-  }, [refetch]);
+    runRefetch(lastLoaded.entries === null);
+  }, [runRefetch]);
   useEffect(
     () => () => {
       if (refetchTimerRef.current !== null) {
@@ -199,11 +207,14 @@ function useReview(): LoopReviewState {
   const [state, setState] = useState<{
     data: ReviewResponse | null;
     error: string | null;
-  }>({ data: null, error: null });
+  }>(() => ({ data: lastLoaded.review, error: null }));
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const load = useCallback(() => {
     rpc.call("automations_review").then(
-      (data) => setState({ data, error: null }),
+      (data) => {
+        lastLoaded.review = data;
+        setState({ data, error: null });
+      },
       (error: unknown) =>
         setState((current) =>
           current.data === null
@@ -488,12 +499,15 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
   const sdk = useSdk();
   const navigate = useBbNavigate();
   const { providers } = useProviders();
-  const [projects, setProjects] = useState<TemplateProject[] | null>(null);
-  const [plan, setPlan] = useState<string | null | undefined>(undefined);
+  const [projects, setProjects] = useState(lastLoaded.projects);
+  const [plan, setPlan] = useState(lastLoaded.plan);
   useEffect(() => {
     let cancelled = false;
     rpc.call("account_plan", null).then(
-      (result) => !cancelled && setPlan(result.plan),
+      (result) => {
+        lastLoaded.plan = result.plan;
+        if (!cancelled) setPlan(result.plan);
+      },
       () => !cancelled && setPlan(null),
     );
     return () => {
@@ -504,27 +518,25 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
     let cancelled = false;
     sdk.projects.list().then(
       (list) => {
-        if (cancelled) return;
-        setProjects(
-          list
-            .filter((project) => project.id !== PERSONAL_PROJECT_ID)
-            .map((project) => ({
-              id: project.id,
-              name: project.name,
-              path:
-                (
-                  project.sources.find((source) => source.isDefault) ??
-                  project.sources[0]
-                )?.path ?? null,
-              github:
-                project.gitRemoteUrl
-                  ?.trim()
-                  .match(
-                    /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i,
-                  )?.[1] ?? null,
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name)),
-        );
+        lastLoaded.projects = list
+          .filter((project) => project.id !== PERSONAL_PROJECT_ID)
+          .map((project) => ({
+            id: project.id,
+            name: project.name,
+            path:
+              (
+                project.sources.find((source) => source.isDefault) ??
+                project.sources[0]
+              )?.path ?? null,
+            github:
+              project.gitRemoteUrl
+                ?.trim()
+                .match(
+                  /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i,
+                )?.[1] ?? null,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (!cancelled) setProjects(lastLoaded.projects);
       },
       () => !cancelled && setProjects([]),
     );

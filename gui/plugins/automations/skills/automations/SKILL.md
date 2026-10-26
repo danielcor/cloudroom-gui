@@ -67,11 +67,11 @@ room-cli loop run <loopId> --project <id> [--idempotency-key <key>]
 room-cli loop runs <loopId> --project <id> [--limit <count>] [--output <runId>]
 room-cli loop delete <loopId> --project <id> --yes
 room-cli loop templates
-room-cli loop create --template <id> --project <id> [--cloud]
+room-cli loop create --template <id> --project <id> [--local]
 room-cli loop settings [--stop-at-limit on|off]
 ```
 
-Priority is P1 (essential) to P4 (niche); `--priority` works on `create` and `update`, Local and Cloud, and loops start at P3. A template fills in its name, prompt, schedule, agent, and priority; any flag you pass wins. With `--cloud`, it runs from the project's newest Cloud thread, else a new one. `runs <cloudLoopId>` lists what each Cloud run reported. `settings` reads or sets whether Cloud loops wait at their agent's plan limit (on by default).
+Priority is P1 (essential) to P4 (niche); `--priority` works on `create` and `update`, Local and Cloud, and loops start at P3. Templates need a paid plan. A template makes a Cloud loop unless `--local`, and fills in its name, prompt, schedule, agent (the project's default when its own isn't set up), and priority; any flag you pass wins. A Cloud one runs from the project's newest Cloud thread, else a new one. `runs <cloudLoopId>` lists what each Cloud run reported. `settings` reads or sets whether Cloud loops wait at their agent's plan limit (on by default).
 
 For partial updates, mode replacement, execution targets, or damaged records,
 read [references/updates.md](references/updates.md). Every command supports `--json`.

@@ -142,21 +142,27 @@ function MacAccessRow() {
 // Bottom of the Machines page. The confirm step keeps sign-out from being a single stray click.
 export function CloudroomSignOut() {
   const status = useCloudroomAccount();
-  const refresh = useRefreshCloudroom();
   const [open, setOpen] = useState(false);
-  const logout = useMutation({ mutationFn: () => sdk.cloudroom.logout(), onSuccess: async () => { setOpen(false); await refresh(); } });
   if (!status.data?.account || status.data.signingIn) return null;
   return <div className="flex flex-col items-center gap-2">
-    <Button variant="outline" size="sm" onClick={() => { logout.reset(); setOpen(true); }}>Sign out</Button>
-    <ConfirmDeleteDialog open={open} onOpenChange={setOpen}>
-      <ConfirmDeleteDialogContent
-        title="Sign out of this app?"
-        description={<>Cloud agents keep running and local history stays. To switch accounts, sign out first. Existing cloud threads stay on their original account and VM.{logout.error instanceof Error && <span role="alert" className="mt-2 block text-destructive">{logout.error.message}</span>}</>}
-        confirmLabel="Sign out"
-        pending={logout.isPending}
-        onConfirm={() => logout.mutate()}
-        onCancel={() => setOpen(false)}
-      />
-    </ConfirmDeleteDialog>
+    <Button variant="outline" size="sm" onClick={() => setOpen(true)}>Sign out</Button>
+    <SignOutDialog open={open} onOpenChange={setOpen} />
   </div>;
+}
+
+export function SignOutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const refresh = useRefreshCloudroom();
+  const logout = useMutation({ mutationFn: () => sdk.cloudroom.logout(), onSuccess: async () => { onOpenChange(false); await refresh(); } });
+  const resetLogout = logout.reset;
+  useEffect(() => { if (open) resetLogout(); }, [open, resetLogout]);
+  return <ConfirmDeleteDialog open={open} onOpenChange={onOpenChange}>
+    <ConfirmDeleteDialogContent
+      title="Sign out of this app?"
+      description={<>Cloud agents keep running and local history stays. To switch accounts, sign out first. Existing cloud threads stay on their original account and VM.{logout.error instanceof Error && <span role="alert" className="mt-2 block text-destructive">{logout.error.message}</span>}</>}
+      confirmLabel="Sign out"
+      pending={logout.isPending}
+      onConfirm={() => logout.mutate()}
+      onCancel={() => onOpenChange(false)}
+    />
+  </ConfirmDeleteDialog>;
 }

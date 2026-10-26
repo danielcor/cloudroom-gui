@@ -104,11 +104,14 @@ export type TelemetryEvent =
       properties: { execution: TelemetryExecution; is_child_thread: boolean; provider: string; error_category: string };
     }
   | { name: "upgrade_prompt"; properties: { where: (typeof UPGRADE_PROMPTS)[number]; action: "viewed" | "clicked" } }
-  | { name: "activation_step"; properties: { step: ActivationStep; action: "clicked" | "done" | "hidden" } };
+  | { name: "activation_step"; properties: { step: ActivationStep; action: "clicked" | "done" | "hidden" } }
+  | { name: "starter_prompt"; properties: { starter: StarterPrompt } };
 
 export const UPGRADE_PROMPTS = ["limit_notice", "queue", "queue_badge", "plan_card", "free_tip", "auto_delete", "try_cloud", "new_thread_cloud", "og_letter"] as const;
 export const ACTIVATION_STEPS = ["cloud", "subagents", "second", "phone", "loop"] as const;
 export type ActivationStep = (typeof ACTIVATION_STEPS)[number];
+export const STARTER_PROMPTS = ["security", "keys", "packages", "mac"] as const;
+export type StarterPrompt = (typeof STARTER_PROMPTS)[number];
 const PLANS = ["free", "pro", "super", "ultra"];
 
 export type PluginTelemetryProperties = Record<string, TelemetryValue>;
