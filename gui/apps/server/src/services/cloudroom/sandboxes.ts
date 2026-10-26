@@ -217,19 +217,20 @@ export async function macDevinLogin(): Promise<string | null> {
 }
 
 /** This computer's Antigravity CLI login, in the file shape agy keeps without a keyring, or null when agy is signed out here.
- *  agy keeps it in the keyring (service gemini, user antigravity): on macOS through /usr/bin/security, so reading it the same way
- *  shows no macOS prompt; on Linux in its own file without a keyring, else in the Secret Service. */
+ *  agy signs in through the keyring (service gemini, user antigravity): on macOS through /usr/bin/security, so reading it the same way
+ *  shows no macOS prompt; on Linux through the Secret Service. Without a keyring it uses its own file. */
 export async function macAgyLogin(): Promise<string | null> {
-  const file = await readFile(join(homedir(), ".gemini/antigravity-cli/antigravity-oauth-token"), "utf8").catch(() => "");
-  const keyring = file.trim() ? "" : process.platform === "darwin"
-    ? await output("/usr/bin/security", ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"])
+  const keyring = process.platform === "darwin" ? await output("/usr/bin/security", ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"])
     : process.platform === "linux" ? await output("secret-tool", ["lookup", "service", "gemini", "username", "antigravity"]) : "";
-  const value = file.trim() || (keyring.startsWith("go-keyring-base64:") ? Buffer.from(keyring.slice(18), "base64").toString("utf8")
-    : keyring.startsWith("go-keyring-encoded:") ? Buffer.from(keyring.slice(19), "hex").toString("utf8") : keyring);
-  try {
-    const refresh = (JSON.parse(value) as { token?: { refresh_token?: unknown } } | null)?.token?.refresh_token;
-    return typeof refresh === "string" && refresh ? value : null;
-  } catch { return null; }
+  const decoded = keyring.startsWith("go-keyring-base64:") ? Buffer.from(keyring.slice(18), "base64").toString("utf8")
+    : keyring.startsWith("go-keyring-encoded:") ? Buffer.from(keyring.slice(19), "hex").toString("utf8") : keyring;
+  const file = await readFile(join(homedir(), ".gemini/antigravity-cli/antigravity-oauth-token"), "utf8").catch(() => "");
+  return [decoded, file.trim()].find(value => {
+    try {
+      const refresh = (JSON.parse(value) as { token?: { refresh_token?: unknown } } | null)?.token?.refresh_token;
+      return typeof refresh === "string" && refresh !== "";
+    } catch { return false; }
+  }) ?? null;
 }
 
 /** Claude plans stay on this Mac: Anthropic allows them only in Claude Code, not in OpenClaw (ADR 0265). API keys travel.

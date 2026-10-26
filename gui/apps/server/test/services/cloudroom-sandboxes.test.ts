@@ -334,10 +334,11 @@ it("tells the user to remove forced API login when Codex refuses ChatGPT sign-in
   }
 });
 
-it.runIf(process.platform === "linux")("copies the Antigravity login from its file, else from the keyring, and nothing without a refresh token", async () => {
+it.runIf(process.platform === "linux")("copies the Antigravity login from the keyring, else from its file, and nothing without a refresh token", async () => {
   const dir = await mkdtemp(join(tmpdir(), "agy-login-"));
   const home = process.env.HOME, path = process.env.PATH;
   const login = JSON.stringify({ token: { access_token: "a", refresh_token: "r", token_type: "Bearer" }, auth_method: "oauth" });
+  const file = JSON.stringify({ token: { refresh_token: "file" } });
   try {
     process.env.HOME = dir;
     process.env.PATH = `${dir}:${path}`;
@@ -346,12 +347,13 @@ it.runIf(process.platform === "linux")("copies the Antigravity login from its fi
     await writeFile(join(dir, "keyring"), `go-keyring-base64:${Buffer.from(login).toString("base64")}`);
     await writeFile(join(dir, "secret-tool"), `#!/bin/sh\n[ "$*" = "lookup service gemini username antigravity" ] && cat "${join(dir, "keyring")}"\n`, { mode: 0o755 });
     expect(await macAgyLogin()).toBe(login);
-    await writeFile(join(dir, "keyring"), JSON.stringify({ token: { access_token: "a" } }));
-    expect(await macAgyLogin()).toBeNull();
-    const file = JSON.stringify({ token: { refresh_token: "file" } });
     await mkdir(join(dir, ".gemini/antigravity-cli"), { recursive: true });
     await writeFile(join(dir, ".gemini/antigravity-cli/antigravity-oauth-token"), file);
+    expect(await macAgyLogin()).toBe(login);
+    await writeFile(join(dir, "keyring"), JSON.stringify({ token: { access_token: "a" } }));
     expect(await macAgyLogin()).toBe(file);
+    await writeFile(join(dir, ".gemini/antigravity-cli/antigravity-oauth-token"), "{");
+    expect(await macAgyLogin()).toBeNull();
   } finally {
     process.env.HOME = home;
     process.env.PATH = path;
