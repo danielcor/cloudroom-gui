@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -330,6 +330,31 @@ it("tells the user to remove forced API login when Codex refuses ChatGPT sign-in
   } finally {
     process.env.PATH = path;
     if (codexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = codexHome;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it.runIf(process.platform === "linux")("copies the Antigravity login from its file, else from the keyring, and nothing without a refresh token", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agy-login-"));
+  const home = process.env.HOME, path = process.env.PATH;
+  const login = JSON.stringify({ token: { access_token: "a", refresh_token: "r", token_type: "Bearer" }, auth_method: "oauth" });
+  try {
+    process.env.HOME = dir;
+    process.env.PATH = `${dir}:${path}`;
+    const { macAgyLogin } = await import("../../src/services/cloudroom/sandboxes.js");
+    expect(await macAgyLogin()).toBeNull();
+    await writeFile(join(dir, "keyring"), `go-keyring-base64:${Buffer.from(login).toString("base64")}`);
+    await writeFile(join(dir, "secret-tool"), `#!/bin/sh\n[ "$*" = "lookup service gemini username antigravity" ] && cat "${join(dir, "keyring")}"\n`, { mode: 0o755 });
+    expect(await macAgyLogin()).toBe(login);
+    await writeFile(join(dir, "keyring"), JSON.stringify({ token: { access_token: "a" } }));
+    expect(await macAgyLogin()).toBeNull();
+    const file = JSON.stringify({ token: { refresh_token: "file" } });
+    await mkdir(join(dir, ".gemini/antigravity-cli"), { recursive: true });
+    await writeFile(join(dir, ".gemini/antigravity-cli/antigravity-oauth-token"), file);
+    expect(await macAgyLogin()).toBe(file);
+  } finally {
+    process.env.HOME = home;
+    process.env.PATH = path;
     await rm(dir, { recursive: true, force: true });
   }
 });

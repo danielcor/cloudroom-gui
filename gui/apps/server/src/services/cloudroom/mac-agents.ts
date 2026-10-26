@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { findCliExecutable } from "@cloudroom/process-utils";
-import { macCursorLogin, macOpenclawLogin, macOpencodeLogin, macVariables } from "./sandboxes.js";
+import { macAgyLogin, macCursorLogin, macOpenclawLogin, macOpencodeLogin, macVariables } from "./sandboxes.js";
 
 const read = (path: string) => readFile(path, "utf8").catch(() => "");
 const parse = (text: string | null): unknown => { try { return text ? JSON.parse(text) : null; } catch { return null; } };
@@ -20,6 +20,7 @@ const AGENTS: [id: string, cli: string, signedIn: () => Promise<boolean>][] = [
   ["acp-hermes-agent", "hermes", async () => hasSecret(parse(await read(join(dir("HERMES_HOME", ".hermes"), "auth.json")))) || setsSecret(await read(join(dir("HERMES_HOME", ".hermes"), ".env")))],
   ["acp-openclaw", "openclaw", async () => (await macOpenclawLogin()) !== null],
   ["acp-grok", "grok", async () => Boolean(process.env.XAI_API_KEY) || hasSecret(parse(await read(join(dir("GROK_HOME", ".grok"), "auth.json"))))],
+  ["acp-agy", "agy", async () => (await macAgyLogin()) !== null],
   ["acp-devin", "devin", async () => setsSecret(await read(join(dir("XDG_DATA_HOME", ".local/share"), "devin", "credentials.toml")))],
   // fx keeps its key and sign-ins in ~/.fx; a Gateway key may live only in the login shell.
   ["acp-fx", "fx", async () => {

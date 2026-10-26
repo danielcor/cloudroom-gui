@@ -42,7 +42,7 @@ export type SandboxTrigger = "app_launch" | "app_activity" | "composer" | "threa
 /** Why a sleeping thread wakes before any work is sent: the user opened it or started typing (ADR 0176). */
 export type SandboxWakeTrigger = Extract<SandboxTrigger, "thread_typing" | "thread_view">;
 /** Logins the website keeps for every sandbox of an account (ADR 0145). */
-export type SandboxLogin = "claude" | "codex" | "pi" | "github" | "cursor" | "opencode" | "mcp" | "hermes" | "devin" | "openclaw";
+export type SandboxLogin = "claude" | "codex" | "pi" | "github" | "cursor" | "opencode" | "mcp" | "hermes" | "devin" | "openclaw" | "agy";
 /** GitHub projects also name their repository and cloud folder, so the website can build a template. */
 export type SandboxProject = { id: string; repository: string | null; folder: string };
 const RECHECK_MS = 60_000;
@@ -214,6 +214,22 @@ export async function macDevinLogin(): Promise<string | null> {
   const path = join(process.env.XDG_DATA_HOME || join(homedir(), ".local/share"), "devin", "credentials.toml");
   const credentials = await readFile(path, "utf8").catch(() => "");
   return credentials.trim() ? JSON.stringify({ credentials }) : null;
+}
+
+/** This computer's Antigravity CLI login, in the file shape agy keeps without a keyring, or null when agy is signed out here.
+ *  agy keeps it in the keyring (service gemini, user antigravity): on macOS through /usr/bin/security, so reading it the same way
+ *  shows no macOS prompt; on Linux in its own file without a keyring, else in the Secret Service. */
+export async function macAgyLogin(): Promise<string | null> {
+  const file = await readFile(join(homedir(), ".gemini/antigravity-cli/antigravity-oauth-token"), "utf8").catch(() => "");
+  const keyring = file.trim() ? "" : process.platform === "darwin"
+    ? await output("/usr/bin/security", ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"])
+    : process.platform === "linux" ? await output("secret-tool", ["lookup", "service", "gemini", "username", "antigravity"]) : "";
+  const value = file.trim() || (keyring.startsWith("go-keyring-base64:") ? Buffer.from(keyring.slice(18), "base64").toString("utf8")
+    : keyring.startsWith("go-keyring-encoded:") ? Buffer.from(keyring.slice(19), "hex").toString("utf8") : keyring);
+  try {
+    const refresh = (JSON.parse(value) as { token?: { refresh_token?: unknown } } | null)?.token?.refresh_token;
+    return typeof refresh === "string" && refresh ? value : null;
+  } catch { return null; }
 }
 
 /** Claude plans stay on this Mac: Anthropic allows them only in Claude Code, not in OpenClaw (ADR 0265). API keys travel.
@@ -922,7 +938,7 @@ export class SandboxDirectory {
   /** Which logins the website holds for this account's sandboxes. */
   async logins(): Promise<Record<SandboxLogin, boolean>> {
     // Missing names mean an older website that cannot hold that login yet.
-    return z.object({ claude: z.boolean(), codex: z.boolean(), pi: z.boolean(), github: z.boolean(), cursor: z.boolean().default(false), opencode: z.boolean().default(false), mcp: z.boolean().default(false), hermes: z.boolean().default(false), devin: z.boolean().default(false), openclaw: z.boolean().default(false) }).parse(await this.call({ action: "status" }, "logins"));
+    return z.object({ claude: z.boolean(), codex: z.boolean(), pi: z.boolean(), github: z.boolean(), cursor: z.boolean().default(false), opencode: z.boolean().default(false), mcp: z.boolean().default(false), hermes: z.boolean().default(false), devin: z.boolean().default(false), openclaw: z.boolean().default(false), agy: z.boolean().default(false) }).parse(await this.call({ action: "status" }, "logins"));
   }
 
   /** Who the account's GitHub login belongs to, or null when GitHub or an older website can't tell. */
@@ -938,8 +954,7 @@ export class SandboxDirectory {
 
   private copiedAt = 0;
   get loginsCopied(): boolean { return this.copiedAt > 0; }
-  /** Copies this Mac's Codex, Pi, opencode, Hermes, Devin, Cursor, and GitHub logins when the user allowed it (ADRs 0128, 0130).
-  /** Copies this Mac's Codex, Pi, opencode, Hermes, OpenClaw, Cursor, and GitHub logins when the user allowed it (ADRs 0128, 0130).
+  /** Copies this Mac's Codex, Pi, opencode, Hermes, Devin, OpenClaw, Antigravity, Cursor, and GitHub logins when the user allowed it (ADRs 0128, 0130).
    *  At most once a minute, unless the user just clicked Connect. `github` is false after the user picked another GitHub account. */
   async copyMacLogins(force = false, github = true): Promise<void> {
     if (!force && Date.now() - this.copiedAt < RECHECK_MS) return;
@@ -948,14 +963,14 @@ export class SandboxDirectory {
     const files = [["codex", codexAuthPath()], ["pi", join(piHome, "auth.json")]] as const;
     // One failed login never stops the others; all failures are reported together.
     const failed: string[] = [];
-    const save = (name: "codex" | "pi" | "opencode" | "hermes" | "devin" | "openclaw" | "cursor" | "github", value: string) => this.saveLogin(name, value).catch((error: unknown) => { failed.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); });
+    const save = (name: "codex" | "pi" | "opencode" | "hermes" | "devin" | "openclaw" | "agy" | "cursor" | "github", value: string) => this.saveLogin(name, value).catch((error: unknown) => { failed.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); });
     for (const [name, path] of files) {
       const value = await readFile(path, "utf8").catch(() => null);
       if (!value) continue;
       try { JSON.parse(value); } catch { continue; }
       await save(name, value);
     }
-    const copy = async (name: "opencode" | "hermes" | "devin" | "openclaw" | "cursor", read: () => Promise<string | null>) => {
+    const copy = async (name: "opencode" | "hermes" | "devin" | "openclaw" | "agy" | "cursor", read: () => Promise<string | null>) => {
       const value = await read().catch((error: unknown) => { failed.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); return null; });
       if (value) await save(name, value);
     };
@@ -963,6 +978,7 @@ export class SandboxDirectory {
     await copy("hermes", macHermesLogin);
     await copy("devin", macDevinLogin);
     await copy("openclaw", macOpenclawLogin);
+    await copy("agy", macAgyLogin);
     await copy("cursor", macCursorLogin);
     const githubToken = github ? await macGithubToken() : "";
     if (githubToken) await save("github", await sandboxGithubLogin(githubToken));
