@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import type { Hono, MiddlewareHandler } from "hono";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
@@ -24,6 +25,7 @@ import { exportableChats, exportChats } from "./chat-export.js";
 import { copyToMac, openOnMac, teleportingToLocal, teleportToLocal } from "./teleport-local.js";
 import { cloudEnvironmentRequestSchema, macCodexLogin, macMcpServers, macSkills, macVariables, sandboxThread, startMacCodexLogin, type CloudEnvironmentRequest } from "./sandboxes.js";
 import { CloudroomError } from "./client.js";
+import { tokenUsageSince } from "./loop-usage.js";
 import { macClis } from "./clis.js";
 import { finishMcpSignIn, isRemoteMcp, startMcpSignIn } from "./mcp-login.js";
 import { archiveThreadAndChildren } from "../threads/thread-archive.js";
@@ -33,9 +35,10 @@ import { continueShare, shareThread, stopSharing, threadShare } from "./shares.j
 import { connectAccount, registerConnect } from "./connect-relay.js";
 import { getGateAuthKind } from "../../request-context.js";
 import { noteActiveMinute, timeInApp } from "./time-in-app.js";
+import { activation } from "./activation.js";
 import { disconnectGithub, githubAccount, githubAuth } from "./github-login.js";
 import { addGithubRepo, githubBranches, repoSuggestions } from "./repo-suggestions.js";
-import { SETUP_ACTIONS, SETUP_AGENTS, SETUP_DETAILS, SETUP_STEPS, UPGRADE_PROMPTS } from "../system/telemetry.js";
+import { ACTIVATION_STEPS, SETUP_ACTIONS, SETUP_AGENTS, SETUP_DETAILS, SETUP_STEPS, UPGRADE_PROMPTS } from "../system/telemetry.js";
 
 const SAFE_SETTINGS_SEARCH = /^(?=.{2,40}$)\p{L}+(?: \p{L}+){0,3}$/u;
 
@@ -88,7 +91,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   });
   app.get("/api/v1/cloudroom/connect", async context => context.json(await connectAccount(deps)));
   app.post("/api/v1/cloudroom/connect", async context => {
-    if (getGateAuthKind(context) !== null) return context.json({ message: "Register from the Mac, not remotely." }, 403);
+    if (getGateAuthKind(context) !== null) return context.json({ message: `Register from the ${COMPUTER}, not remotely.` }, 403);
     return context.json(await registerConnect(deps));
   });
   app.post("/api/v1/cloudroom/shares/continue", async context => {
@@ -132,6 +135,13 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   app.post("/api/v1/cloudroom/account/activity", async (context) => {
     z.object({}).strict().parse(await context.req.json());
     await cloudroom(deps).noteActivity();
+    return context.json({ ok: true });
+  });
+  app.get("/api/v1/cloudroom/activation", async (context) => context.json(await activation(deps)));
+  app.post("/api/v1/cloudroom/activation", async (context) => {
+    const parsed = z.object({ step: z.enum(ACTIVATION_STEPS), action: z.enum(["clicked", "hidden"]).default("clicked") }).strict().safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) throw new ApiError(400, "invalid_activation_step", "Invalid checklist step.");
+    deps.telemetry.capture({ name: "activation_step", properties: parsed.data });
     return context.json({ ok: true });
   });
   app.get("/api/v1/cloudroom/time-in-app", async (context) => {
@@ -226,7 +236,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   // Cloud automations (ADR 0212): the website stores and runs them, so they keep running while this Mac is off.
   // A child Cloud thread shares its parent's sandbox, so the website gets the parent and the child's own session.
   app.post("/api/v1/cloudroom/account/automations", async (context) => {
-    const input = z.object({ action: z.enum(["list", "create", "update", "run", "delete", "hook", "unhook", "events", "ack"]), thread: z.string().min(1).max(64).optional() }).passthrough().parse(await context.req.json());
+    const input = z.object({ action: z.enum(["list", "create", "update", "run", "runs", "history", "delete", "hook", "unhook", "events", "ack", "settings", "report"]), thread: z.string().min(1).max(64).optional() }).passthrough().parse(await context.req.json());
     let body: Record<string, unknown> = input;
     if (input.action === "create") {
       const thread = input.thread ? getThread(deps.db, input.thread) : null;
@@ -240,6 +250,11 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
       const status = error instanceof CloudroomError ? error.status : null;
       throw new ApiError(status === 404 || status === 429 ? status : status ? 400 : 503, "cloud_automation", error instanceof Error ? error.message : String(error));
     }));
+  });
+  // Loop usage estimates (docs/scopes/loops.md): tokens the Loops plugin's runs used, and all of the provider's.
+  app.post("/api/v1/cloudroom/account/token-usage", async (context) => {
+    const input = z.object({ providerId: z.string().min(1).max(100), threadIds: z.array(z.string().min(1).max(64)).max(500), threadsSince: z.number().int().nonnegative(), totalSince: z.number().int().nonnegative() }).parse(await context.req.json());
+    return context.json(tokenUsageSince(deps.db, input));
   });
   // Organizations (docs/scopes/organizations.md): the Organization plugin's requests, passed to the website as this account.
   app.post("/api/v1/cloudroom/account/org", async (context) => {
@@ -255,7 +270,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     const { names } = z.object({ names: z.array(z.string()).min(1).max(100) }).strict().parse(await context.req.json());
     const found = await macVariables();
     const variables = Object.fromEntries(names.flatMap(name => found[name] ? [[name, found[name]]] : []));
-    if (!Object.keys(variables).length) throw new ApiError(404, "mac_variables_missing", "Those variables are no longer set in your shell on this Mac.");
+    if (!Object.keys(variables).length) throw new ApiError(404, "mac_variables_missing", `Those variables are no longer set in your shell on this ${COMPUTER}.`);
     return context.json(await environment({ action: "set", variables }));
   });
   // Skills from this Mac that every new cloud thread gets. A change saves at once; the upload runs in the background.

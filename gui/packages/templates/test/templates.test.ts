@@ -19,7 +19,7 @@ describe("@cloudroom/templates", () => {
   it("documents automation updates that keep omitted settings", () => {
     const guide = renderTemplate("bbGuideAutomations", {});
 
-    expect(guide).toContain("room-cli automation update <automationId>");
+    expect(guide).toContain("room-cli loop update <loopId>");
     expect(guide).toContain("and keeps every");
     expect(guide).toContain("--env-json");
     expect(guide).toContain("--reasoning <none|low|medium|high");

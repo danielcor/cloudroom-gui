@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { buildAutomationEditThreadPrompt } from "@cloudroom/shared-ui/resource-edit-prompt";
@@ -67,6 +68,12 @@ type OverviewEntry = AutomationsOverviewResponse["automations"][number];
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function loadErrorText(error: unknown): string {
+  return error instanceof Error && Reflect.get(error, "code") === "needs_mac"
+    ? error.message
+    : "Couldn't load loops.";
 }
 
 interface DetailRoute {
@@ -143,7 +150,7 @@ function useOverview(): {
             setState((current) =>
               !showLoading && current.entries !== null
                 ? current
-                : { entries: null, error: errorText(error) },
+                : { entries: null, error: loadErrorText(error) },
             ),
         )
         .finally(() => {
@@ -418,6 +425,8 @@ function useMutations() {
       rpc.call("automations_new_webhook_url", route),
     update: (route: DetailRoute, agent: AgentExecutionUpdate) =>
       rpc.call("automations_update", { ...route, agent }),
+    setPriority: (route: DetailRoute, priority: number) =>
+      rpc.call("automations_update", { ...route, priority }),
   };
 }
 
@@ -507,6 +516,12 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
                   project.sources.find((source) => source.isDefault) ??
                   project.sources[0]
                 )?.path ?? null,
+              github:
+                project.gitRemoteUrl
+                  ?.trim()
+                  .match(
+                    /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i,
+                  )?.[1] ?? null,
             }))
             .sort((a, b) => a.name.localeCompare(b.name)),
         );
@@ -531,7 +546,7 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
           });
           const agent = ownAgent || defaults === null ? template : defaults;
           if (target === "cloud") {
-            const { automation } = (await rpc.call("cloud_template_add", {
+            await rpc.call("cloud_template_add", {
               projectId,
               name: template.name,
               prompt: template.prompt,
@@ -540,13 +555,15 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
               providerId: agent.providerId,
               model: agent.model,
               reasoningLevel: agent.reasoningLevel,
-            })) as { automation: { id: string } };
-            return `cloud:${automation.id}`;
+              priority: template.priority,
+            });
+            return;
           }
-          const created = await rpc.call("automations_create", {
+          await rpc.call("automations_create", {
             projectId,
             name: template.name,
             origin: "human",
+            priority: template.priority,
             trigger: { triggerType: "schedule", cron: template.cron, timezone },
             execution: {
               mode: "agent",
@@ -558,14 +575,13 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
               environment: { type: "project-default" },
             },
           });
-          return `local:${created.id}`;
         }),
       );
       const failed = results.filter((result) => result.status === "rejected");
       const added = results.length - failed.length;
       if (added > 0) {
         toast.success(
-          `${template.name} is on for ${added} repo${added === 1 ? "" : "s"}${target === "cloud" ? " in the Cloud" : ", on this Mac"}.`,
+          `${template.name} is on for ${added} repo${added === 1 ? "" : "s"}${target === "cloud" ? " in the Cloud" : `, on this ${COMPUTER}`}.`,
         );
       }
       if (failed[0]?.status === "rejected") {
@@ -574,9 +590,6 @@ function useTemplates(onAdded: () => void): LoopTemplatesState {
         );
       }
       onAdded();
-      return results.flatMap((result) =>
-        result.status === "fulfilled" ? [result.value] : [],
-      );
     },
     [providers, rpc, sdk, onAdded],
   );
@@ -630,6 +643,19 @@ function OverviewView({
     [mutations],
   );
 
+  const changePriority = useCallback(
+    async (route: DetailRoute, priority: number) => {
+      try {
+        await mutations.setPriority(route, priority);
+      } catch (rpcError: unknown) {
+        toast.error(`Couldn't change the priority: ${errorText(rpcError)}`);
+        throw rpcError;
+      }
+      refetch();
+    },
+    [mutations, refetch],
+  );
+
   const createViaChat = useCallback(
     (prompt?: string) => {
       navigate.toCompose({
@@ -647,6 +673,7 @@ function OverviewView({
       onRetry={refetch}
       onOpenDetail={onOpenDetail}
       onEnabledChange={changeEnabled}
+      onPriorityChange={changePriority}
       onCreateViaChat={createViaChat}
       activeMode={activeMode}
       onModeChange={onModeChange}
@@ -657,6 +684,7 @@ function OverviewView({
         openRoute === null
           ? undefined
           : {
+              projectId: openRoute.projectId,
               automationId: openRoute.automationId,
               render: (priority, onPriorityChange) => (
                 <LocalLoopDialog
@@ -711,6 +739,7 @@ function localLoop(automation: AutomationResponse): LoopDialogLoop {
             : automationEnvironmentLabel(execution)
         } · ${PERMISSION_LABELS[execution.permissionMode] ?? execution.permissionMode}`
       : "Local · script",
+    ...(agent ? { usageKey: { automationId: automation.id } } : {}),
   };
 }
 

@@ -26,6 +26,7 @@
     "prepare:bundled": "bb-plugin-build prepare-bundled"
   },
   "dependencies": {
+    "@cloudroom/domain": "workspace:*",
     "@cloudroom/connect-client": "workspace:*",
     "@cloudroom/shared-ui": "workspace:*",
     "@cloudroom/tunnel-client": "workspace:*",

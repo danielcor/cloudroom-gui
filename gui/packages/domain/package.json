@@ -29,6 +29,11 @@
       "types": "./src/utf16.ts",
       "default": "./src/utf16.ts"
     },
+    "./computer-name": {
+      "source": "./src/computer-name.ts",
+      "types": "./src/computer-name.ts",
+      "default": "./src/computer-name.ts"
+    },
     "./update-state": {
       "source": "./src/update-state.ts",
       "types": "./src/update-state.ts",

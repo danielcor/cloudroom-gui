@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -99,7 +100,7 @@ let tokenRun: TokenRun | null = null;
  */
 function runSetupToken(id: string, save: (token: string) => Promise<unknown>): TokenRun {
   const binary = claudeBinary() ?? desktopClaude();
-  if (!binary) throw new ApiError(409, "claude_missing", "Claude Code isn't installed on this Mac.");
+  if (!binary) throw new ApiError(409, "claude_missing", `Claude Code isn't installed on this ${COMPUTER}.`);
   const dir = mkdtempSync(join(tmpdir(), "cloudroom-claude-"));
   const browser = join(dir, "open");
   writeFileSync(browser, `#!/bin/sh\nprintf '%s' "$1" > "$0.url"\n`, { mode: 0o700 });

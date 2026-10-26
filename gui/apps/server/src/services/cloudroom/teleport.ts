@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { and, asc, desc, eq, inArray, isNull, like } from "drizzle-orm";
@@ -321,7 +322,7 @@ class Teleport {
       .filter((other) => !all.some((source) => source.id === other.id)).length;
     const warnings = [
       ...(all.length > 1 ? [`${all.length - 1} child thread(s) move to Cloud with it.`] : []),
-      ...(sharing ? [`${sharing} other open thread(s) use this folder; they stay on this Mac.`] : []),
+      ...(sharing ? [`${sharing} other open thread(s) use this folder; they stay on this ${COMPUTER}.`] : []),
     ];
     return { model: execution.model, reasoning: execution.reasoning, warnings };
   }

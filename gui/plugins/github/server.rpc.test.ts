@@ -339,8 +339,8 @@ describe("github plugin RPC behavior", () => {
     ).toEqual([
       {
         id: "acme/widgets#7",
-        title: "#7 Cache mutations",
-        subtitle: "acme/widgets",
+        title: "acme/widgets#7",
+        subtitle: "Cache mutations",
       },
     ]);
     await expect(
@@ -353,6 +353,60 @@ describe("github plugin RPC behavior", () => {
         (signal) => signal.channel === "data-changed",
       ),
     ).toHaveLength(3);
+  });
+
+  it("keeps GitHub-authored text inside the untrusted block on every agent path", async () => {
+    const host = createFakePluginHost({
+      pluginId: "github",
+      settings: { extraRepos: "acme/widgets", defaultProject: "project-1" },
+      sdk: { threads: { spawn: () => ({ id: "thread-spawned" }) } },
+    });
+    await plugin(host.bb);
+    const { harness } = host;
+    await harness.callRpc("refresh");
+
+    await harness.callRpc("startWork", { repo: "acme/widgets", number: 7 });
+    await harness.callRpc("startReview", { repo: "acme/widgets", number: 42 });
+    const [issuePrompt = "", pullPrompt = ""] = harness.sdk
+      .callsTo("threads.spawn")
+      .map(([args]) => (args as { prompt: string }).prompt);
+    const beforeBlock = (text: string) => text.split("<github-text kind")[0];
+
+    expect(issuePrompt.split("\n")[0]).toBe(
+      "Work on GitHub issue acme/widgets#7.",
+    );
+    expect(issuePrompt).toContain(
+      '<github-text kind="issue" ref="acme/widgets#7" author="alice">\nTitle: Cache mutations\n\nKeep the cache synchronized.\n</github-text>',
+    );
+    expect(beforeBlock(issuePrompt)).not.toContain("Cache mutations");
+    expect(issuePrompt).not.toContain("requested change");
+    expect(pullPrompt.split("\n")[0]).toBe(
+      "Review GitHub pull request acme/widgets#42.",
+    );
+    expect(pullPrompt).toContain(
+      '<github-text kind="pull-request" ref="acme/widgets#42" author="bob">\nTitle: Normalize pull details\n</github-text>',
+    );
+    expect(beforeBlock(pullPrompt)).not.toContain("Normalize pull details");
+
+    const provider = (id: string) => {
+      const found = harness.registrations.mentionProviders.find(
+        (entry) => entry.id === id,
+      );
+      if (found === undefined) throw new Error(`no ${id} mention provider`);
+      return found;
+    };
+    const live = await provider("issue").resolve("acme/widgets#7");
+    expect(live.context).toContain(
+      '<github-text kind="issue" ref="acme/widgets#7" author="alice">\nTitle: Cache mutations\n\nLive issue body.\n</github-text>',
+    );
+    expect(beforeBlock(live.context)).not.toContain("Cache mutations");
+
+    writeFileSync(join(binDir, "gh"), "#!/usr/bin/env bash\nexit 1\n");
+    const cached = await provider("pr").resolve("acme/widgets#42");
+    expect(cached.context).toContain(
+      '<github-text kind="pull-request" ref="acme/widgets#42" author="bob">\nTitle: Normalize pull details\n\nNormalize every GitHub shape.\n</github-text>',
+    );
+    expect(beforeBlock(cached.context)).not.toContain("Normalize pull details");
   });
 
   it("normalizes draft state, checks, review threads, and paginated files", async () => {

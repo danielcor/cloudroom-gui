@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFakePluginHost,
@@ -65,7 +66,7 @@ describe("Connect remote host access", () => {
   it("adds one remote host per machine on our relay, keeps it across restarts, and revokes it on release", async () => {
     const relay = fakeRelay();
     const original = await setup(relay);
-    expect(provider(original).description).toBe("Use this Mac's private cloudroom.run address.");
+    expect(provider(original).description).toBe(`Use this ${COMPUTER}'s private cloudroom.run address.`);
     const grant = await provider(original).acquire(request);
     expect(grant).toEqual({
       id: request.hostId,

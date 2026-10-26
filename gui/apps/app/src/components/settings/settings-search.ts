@@ -1,3 +1,4 @@
+import { COMPUTER_TITLE } from "@cloudroom/domain";
 import { useEffect } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
@@ -158,7 +159,7 @@ const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     ["Cloudroom account", "sign in login email account sign out"],
     ["Plan & billing", "billing plan subscription invoices upgrade pro ultra payment"],
     ["Or connect your own Core", "self-hosted core url api token server"],
-    ["Mac access", "cloud agents permission full read-only ask off"],
+    [`${COMPUTER_TITLE} access`, "mac computer access cloud agents permission full read-only ask off"],
     ["Machines", "mac computer devices rename"],
     ["Connection method", "ssh remote machine access"],
     ["Server address", "url host remote"],

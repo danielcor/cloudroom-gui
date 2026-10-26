@@ -699,7 +699,7 @@ def script_of(job):
     return None
 
 
-def review(core, job, level):
+def review(core, job, level, script):
     account, token = (core.connection.get('account') or {}).get('id'), core.connection.get('sandboxToken')
     key, now = (core.url, job.get('command')), time.monotonic()
     with REVIEWS['lock']:
@@ -714,8 +714,9 @@ def review(core, job, level):
         try:
             credential = base64.b64encode((account + ':' + token).encode()).decode()
             body = {'command': job['command'][:8000], 'cwd': job.get('cwd'), 'write': bool(job.get('write')), 'level': level, 'thread': core.thread}
-            with contextlib.suppress(OSError, ValueError):
-                body['script'] = script_of(job)
+            if script:
+                with contextlib.suppress(OSError, ValueError):
+                    body['script'] = script_of(job)
             control(website(core.config, core.connection) + '/api/desktop/mac-reviews', body, 'POST', {'Authorization': 'Basic ' + credential})
         except (OSError, ValueError, KeyError, TypeError):
             pass
@@ -853,8 +854,6 @@ class MacJobs:
         def post(body, timeout=MAC_POST_SECONDS):
             core.fetch(core.url + '/v1/mac/results/' + urllib.parse.quote(job['id']), {'device': device, **body}, None, core.headers,
                        timeout)
-        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
-            review(core, job, mac_level(self.enabled() or {}))
         # Run only once Core confirms it still wants the job. Core gives up on an unconfirmed job after about 10 s and tells
         # the agent it did not run, so running it anyway could change the Mac twice when the agent retries.
         confirmed, deadline = False, time.monotonic() + 30
@@ -874,6 +873,9 @@ class MacJobs:
         refused = ('The Mac could not confirm this command with the cloud, so it did not run. Try again.' if not confirmed else
                    "The Mac could not download this command's input from the cloud, so it did not run. Try again." if job['stdin'] is None else
                    self.refusal(core, job))
+        # Refused commands are checked too, but a script file is read only for a command that will run.
+        with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+            review(core, job, mac_level(self.enabled() or {}), not refused)
         sandboxed = not refused and not job.get('write') and mac_level(self.enabled() or {}) != 'full'
         login = pwd.getpwuid(os.getuid()).pw_shell or '/bin/zsh'
         # Cloudroom's own tools (browser-harness) come first, as in Local threads, after the user's profile sets PATH.

@@ -6,11 +6,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateHostProviderCliStatus } from "@/hooks/cache-owners/provider-cli-status-cache-owner";
-import type {
-  AppSettings,
-  CompletedTurnDisplay,
-  ProviderInfo,
-} from "@cloudroom/domain";
+import { COMPUTER, COMPUTER_TITLE, type AppSettings, type CompletedTurnDisplay, type ProviderInfo } from "@cloudroom/domain";
 import type { ProviderCliStatus } from "@cloudroom/host-daemon-contract";
 import type { SystemProviderState } from "@cloudroom/server-contract";
 import { Button } from "@cloudroom/shared-ui/button";
@@ -191,7 +187,7 @@ function Cells({
 }) {
   return (
     <span className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 pl-8 sm:contents">
-      <Cell label="Mac" className={CELL.mac}>
+      <Cell label={COMPUTER_TITLE} className={CELL.mac}>
         {mac}
       </Cell>
       {showCloud ? (
@@ -209,7 +205,7 @@ function Cells({
 
 const DASH = <span className="text-muted-foreground/50">–</span>;
 const MAC_ONLY = (
-  <span className="text-xs text-muted-foreground">Mac only</span>
+  <span className="text-xs text-muted-foreground">{COMPUTER_TITLE} only</span>
 );
 
 function Check({ label }: { label: string }) {
@@ -260,7 +256,7 @@ function MacLogin({
   if (state === undefined) return null;
   if (state.status !== "unauthenticated" && state.status !== "expired") {
     return state.status === "ready" ? (
-      <Check label={`Signed in to ${provider.displayName} on this Mac`} />
+      <Check label={`Signed in to ${provider.displayName} on this ${COMPUTER}`} />
     ) : (
       DASH
     );
@@ -335,7 +331,7 @@ function CloudLogin({ provider }: { provider: ProviderInfo }) {
   // Cursor (ADR 0161) and the rest can't run in Cloud.
   return cloudCanRunHarness(provider.id) ? (
     <Check
-      label={`${provider.displayName} runs in the Cloud with this Mac's login`}
+      label={`${provider.displayName} runs in the Cloud with this ${COMPUTER}'s login`}
     />
   ) : (
     MAC_ONLY
@@ -645,7 +641,7 @@ function TableHeader({ showCloud }: { showCloud: boolean }) {
   return (
     <div className="mb-2.5 hidden items-center gap-3 border-b border-border pb-2 text-2xs font-medium uppercase tracking-wide text-muted-foreground sm:flex">
       <span className="flex-1 pl-16">Agent</span>
-      <span className={cn("text-center", CELL.mac)}>Mac</span>
+      <span className={cn("text-center", CELL.mac)}>{COMPUTER_TITLE}</span>
       {showCloud ? (
         <span className={cn("text-center", CELL.cloud)}>Cloud</span>
       ) : null}

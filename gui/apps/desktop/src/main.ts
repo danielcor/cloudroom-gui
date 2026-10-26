@@ -28,7 +28,7 @@ import {
 } from "@cloudroom/config/app-surface";
 import { applyPackagedDesktopRuntimeEnv } from "@cloudroom/config/runtime";
 import type { ConnectCredential } from "@cloudroom/connect-client";
-import type { AppKeybindings } from "@cloudroom/domain";
+import { COMPUTER, type AppKeybindings } from "@cloudroom/domain";
 import {
   bbDesktopBrowserImportCookiesRequestSchema,
   bbDesktopThemeSchema,
@@ -375,7 +375,7 @@ let relayCredentialCache: ConnectCredentialCache | null = null;
 let relayCredential: ConnectCredential | null = null;
 // Set while this Mac stands in for the chosen Mac because it was offline at launch.
 let computerFallback: { handle: string; name: string; back: boolean } | null = null;
-let thisComputerName = "This Mac";
+let thisComputerName = BUILTIN_SERVER_NAME;
 let builtinServerUrl: string = DEFAULT_BB_SERVER_URL;
 let desktopBridgePath: string | null = null;
 let desktopUserDataPath: string | null = null;
@@ -1223,7 +1223,7 @@ async function applyServerTarget(): Promise<void> {
     if (!attached) {
       await loadStartupError({
         details:
-          "Could not connect to the local Cloudroom server on this Mac. Check that the port is free or that a compatible Cloudroom server is running.",
+          `Could not connect to the local Cloudroom server on this ${COMPUTER}. Check that the port is free or that a compatible Cloudroom server is running.`,
         logs: "",
         retryable: true,
         title: "Could not connect",

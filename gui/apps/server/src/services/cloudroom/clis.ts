@@ -35,6 +35,7 @@ const CLIS: (Omit<MacCli, "install"> & { run: string })[] = [
   { name: "cloudflared", title: "Cloudflare Tunnel", run: download("cloudflared", `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARCH}`) },
   { name: "yt-dlp", title: "yt-dlp", run: download("yt-dlp", "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp") },
   { name: "uv", title: "uv", run: "curl -LsSf https://astral.sh/uv/install.sh | sh" },
+  { name: "mise", title: "mise", run: "curl -fsSL https://mise.run | sh" },
   { name: "hf", title: "Hugging Face CLI", key: "HF_TOKEN", run: "{ command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh; ~/.local/bin/uv tool install -q huggingface_hub; }" },
   { name: "deno", title: "Deno", run: "curl -fsSL https://deno.land/install.sh | sudo DENO_INSTALL=/usr/local sh -s -- -y --no-modify-path" },
   { name: "go", title: "Go", run: `{ curl -fsSL "https://go.dev/dl/$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1).linux-${ARCH}.tar.gz" | sudo tar -xz -C /usr/local && sudo ln -sf /usr/local/go/bin/go /usr/local/go/bin/gofmt /usr/local/bin/; }` },

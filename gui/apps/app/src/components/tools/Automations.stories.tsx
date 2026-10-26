@@ -31,6 +31,7 @@ function automation(
     projectId: "proj_personal",
     name,
     enabled: true,
+    priority: 3,
     trigger: {
       triggerType: "schedule",
       cron: "0 9 * * 1-5",
@@ -285,7 +286,6 @@ export function OverviewRows() {
                 project={project}
                 scriptAgents={undefined}
                 providers={[]}
-                showProject={false}
                 now={Date.now()}
                 onNavigate={noop}
                 onEnabledChange={async () => {}}
@@ -304,7 +304,6 @@ export function OverviewRows() {
             project={{ id: "proj_personal", name: "Personal" }}
             scriptAgents={[]}
             providers={[]}
-            showProject
             now={Date.now()}
             onNavigate={noop}
             onEnabledChange={async () => {}}
@@ -461,7 +460,7 @@ export const CloudAutomations = () => (
         automation={automation}
         providers={[]}
         now={now}
-        actions={{ onOpen: noop, onRun: noop, onDelete: noop, onEnabledChange: noop, onNewUrl: noop, onSave: async () => true }}
+        actions={{ onOpen: noop, onRun: noop, onDelete: noop, onEnabledChange: noop, onNewUrl: noop, onSave: async () => true, onPriorityChange: async () => {} }}
       />
     ))}
   </StoryCard>

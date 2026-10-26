@@ -10,6 +10,7 @@ import {
   createAutomationInputSchema,
   linkThreadInputSchema,
   listAutomationsInputSchema,
+  loopPrioritySchema,
   projectAutomationInputSchema,
   reasoningLevelSchema,
   reviewMarkInputSchema,
@@ -20,12 +21,22 @@ import {
 import { z } from "zod";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import type { AutomationService } from "./service.js";
+import type { Db } from "./data.js";
+import { cloudLoopUsage, localLoopUsage } from "./usage.js";
 
 const cloudAutomationInputSchema = z
   .object({
-    action: z.enum(["list", "create", "update", "run", "delete", "hook"]),
+    action: z.enum(["list", "create", "update", "run", "delete", "hook", "settings"]),
   })
   .passthrough();
+
+const loopUsageInputSchema = z
+  .object({
+    automationId: z.string().min(1).optional(),
+    cloudId: z.string().min(1).optional(),
+    crons: z.array(z.string().min(1).max(120)).min(1).max(20),
+  })
+  .strict();
 
 const cloudTemplateInputSchema = z
   .object({
@@ -37,6 +48,7 @@ const cloudTemplateInputSchema = z
     providerId: z.string().min(1),
     model: z.string().min(1),
     reasoningLevel: reasoningLevelSchema,
+    priority: loopPrioritySchema,
   })
   .strict();
 
@@ -103,6 +115,14 @@ export const automationRpcContract = defineRpcContract({
     input: cloudAutomationInputSchema,
     output: z.unknown(),
   },
+  // Usage estimates (docs/scopes/loops.md): each schedule's rough share of the weekly Claude or Codex limit.
+  automations_usage: {
+    input: loopUsageInputSchema,
+    output: z
+      .object({ limit: z.string(), percents: z.record(z.string(), z.number()) })
+      .strict()
+      .nullable(),
+  },
   cloud_template_add: {
     input: cloudTemplateInputSchema,
     output: z.unknown(),
@@ -113,7 +133,7 @@ export const automationRpcContract = defineRpcContract({
   },
 });
 
-type Sdk = Pick<BbPluginApi["sdk"], "cloudroom" | "threads">;
+type Sdk = Pick<BbPluginApi["sdk"], "cloudroom" | "system" | "threads">;
 type Cloud = Sdk["cloudroom"];
 type CloudAutomation = NonNullable<
   Awaited<ReturnType<Cloud["automations"]>>["automation"]
@@ -179,9 +199,12 @@ async function hasCloudSession(sdk: Sdk, threadId: string): Promise<boolean> {
 }
 
 // A Cloud loop needs an open, started Cloud thread in its project: the newest one, else a new one started for it.
-async function cloudTemplateHost(
+export async function cloudTemplateHost(
   sdk: Sdk,
-  input: z.output<typeof cloudTemplateInputSchema>,
+  input: Pick<
+    z.output<typeof cloudTemplateInputSchema>,
+    "projectId" | "name" | "providerId" | "model"
+  >,
 ): Promise<string> {
   const threads = await sdk.threads.list({
     projectId: input.projectId,
@@ -228,8 +251,19 @@ async function cloudTemplateHost(
   }
 }
 
-export function createRpcHandlers(service: AutomationService, sdk?: Sdk) {
+export function createRpcHandlers(
+  service: AutomationService,
+  sdk?: Sdk,
+  db?: Db,
+) {
   return {
+    async automations_usage(input: z.output<typeof loopUsageInputSchema>) {
+      if (!sdk) return null;
+      if (input.cloudId) return cloudLoopUsage(sdk, input.cloudId, input.crons);
+      if (input.automationId && db)
+        return localLoopUsage(sdk, db, input.automationId, input.crons);
+      return null;
+    },
     async cloud_automations(
       input: z.output<typeof cloudAutomationInputSchema>,
     ) {
@@ -255,6 +289,7 @@ export function createRpcHandlers(service: AutomationService, sdk?: Sdk) {
         harness: input.providerId,
         model: input.model,
         reasoning: input.reasoningLevel,
+        priority: input.priority,
       });
     },
     async account_plan() {

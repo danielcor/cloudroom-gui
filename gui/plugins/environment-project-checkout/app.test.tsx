@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
@@ -46,7 +47,7 @@ describe("checkout inputs control", () => {
     expect(trigger.hasAttribute("disabled")).toBe(false);
     fireEvent.click(trigger);
     expect(await slot.findByText("On GitHub")).toBeTruthy();
-    expect(slot.queryByText("On this Mac")).toBeNull();
+    expect(slot.queryByText(`On this ${COMPUTER}`)).toBeNull();
     expect(slot.queryByRole("button", { name: "local-only" })).toBeNull();
     fireEvent.click(slot.getByRole("button", { name: "release" }));
     expect(onChange).toHaveBeenLastCalledWith({
@@ -108,7 +109,7 @@ describe("checkout inputs control", () => {
       },
     );
     fireEvent.click(slot.getByRole("combobox", { name: "Branch" }));
-    expect(await slot.findByText("On this Mac")).toBeTruthy();
+    expect(await slot.findByText(`On this ${COMPUTER}`)).toBeTruthy();
     expect(slot.getByText("On GitHub")).toBeTruthy();
     expect(slot.getByRole("button", { name: /^main\s*current$/ })).toBeTruthy();
     expect(slot.getAllByRole("button", { name: /^main/ })).toHaveLength(1);

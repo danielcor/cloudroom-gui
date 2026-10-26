@@ -6,6 +6,8 @@ import type {
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import type { AutomationService } from "./service.js";
+import { LOOP_TEMPLATES } from "../templates.js";
+import { cloudTemplateHost } from "./rpc.js";
 import type {
   AgentEnvironment,
   AgentExecutionUpdate,
@@ -15,6 +17,7 @@ import type {
   AutomationRunResponse,
   AutomationScriptInterpreter,
   CreateAutomationInput,
+  LoopPriority,
   PermissionMode,
   ReasoningLevel,
   ResolvedCreateAutomationInput,
@@ -28,6 +31,7 @@ import {
 } from "./provider-permissions.js";
 import {
   AUTOMATION_SCRIPT_TIMEOUT_DEFAULT_MS,
+  DEFAULT_LOOP_PRIORITY,
   automationScriptInterpreterSchema,
   permissionModeSchema,
   reasoningLevelSchema,
@@ -184,6 +188,66 @@ function parseReasoningLevel(value: string): ReasoningLevel {
   if (parsed.success) return parsed.data;
   throw new Error(
     "Invalid --reasoning. Expected none, low, medium, high, xhigh, ultracode, max, or ultra.",
+  );
+}
+
+function parsePriority(args: ParsedArgs): { priority?: LoopPriority } {
+  if (!args.flags.has("priority")) return {};
+  const value = /^p?([1-4])$/iu.exec(requireFlag(args, "priority"))?.[1];
+  if (!value) throw new Error("Invalid --priority. Expected 1, 2, 3, or 4.");
+  return { priority: Number(value) as LoopPriority };
+}
+
+function parseLimit(args: ParsedArgs, fallback: number): number {
+  const text = flag(args, "limit");
+  if (text === undefined) return fallback;
+  const limit = Number.parseInt(text, 10);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw new Error("--limit must be a positive integer.");
+  }
+  return limit;
+}
+
+/** `create --template ID`: the template fills every setting the flags leave out, like the Templates tab. */
+function applyTemplate(args: ParsedArgs): void {
+  if (!args.flags.has("template")) return;
+  const id = requireFlag(args, "template");
+  const template = LOOP_TEMPLATES.find((candidate) => candidate.id === id);
+  if (!template) {
+    throw new Error(`Unknown template '${id}'. Run room-cli loop templates.`);
+  }
+  const scheduled = ["cron", "at", "in", "webhook"].some((name) =>
+    args.flags.has(name),
+  );
+  const defaults: Record<string, string> = {
+    name: template.name,
+    prompt: template.prompt,
+    provider: template.providerId,
+    model: template.model,
+    reasoning: template.reasoningLevel,
+    priority: String(template.priority),
+    ...(scheduled
+      ? {}
+      : {
+          cron: template.cron,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+  };
+  for (const [name, value] of Object.entries(defaults)) {
+    if (!args.flags.has(name)) args.flags.set(name, value);
+  }
+}
+
+function printTemplates(): string {
+  return table(
+    ["ID", "P", "Schedule", "Agent", "Name"],
+    LOOP_TEMPLATES.map((template) => [
+      template.id,
+      `P${template.priority}`,
+      template.cron,
+      `${template.providerId} · ${template.model} · ${template.reasoningLevel}`,
+      template.name,
+    ]),
   );
 }
 
@@ -636,6 +700,7 @@ async function buildUpdateRequest(
   const request: UpdateAutomationInput = { projectId, automationId };
   const name = flag(args, "name");
   if (name !== undefined) request.name = name;
+  Object.assign(request, parsePriority(args));
   if (
     flag(args, "cron") !== undefined ||
     flag(args, "timezone") !== undefined ||
@@ -683,12 +748,13 @@ async function buildUpdateRequest(
   }
   if (
     request.name === undefined &&
+    request.priority === undefined &&
     request.trigger === undefined &&
     request.execution === undefined &&
     request.agent === undefined
   ) {
     throw new Error(
-      "No changes requested. Provide --name, schedule flags, or agent or script execution flags.",
+      "No changes requested. Provide --name, --priority, schedule flags, or agent or script execution flags.",
     );
   }
   return { request, ...(scriptSource ? { scriptSource } : {}) };
@@ -720,6 +786,7 @@ function printAutomation(
     `  Name:      ${automation.name}`,
     ...(status === undefined ? [] : [`  Status:    ${status}`]),
     `  Enabled:   ${automation.enabled ? "yes" : "no"}`,
+    `  Priority:  P${automation.priority}`,
     `  Mode:      ${automation.execution.mode}`,
     `  Schedule:  ${formatAutomationTrigger(automation)}`,
     `  Next run:  ${formatTimestamp(automation.nextRunAt)}`,
@@ -768,7 +835,7 @@ function refreshScriptFileCommand(
   if (automation.execution.mode !== "script") return "";
   const argv = [
     "room-cli",
-    "automation",
+    "loop",
     "update",
     automation.id,
     "--project",
@@ -833,13 +900,14 @@ function printAutomationProblem(automation: AutomationReadProblem): string {
 
 function printAutomationTable(automations: AutomationReadResult[]): string {
   return table(
-    ["ID", "Name", "Status", "On", "Schedule", "Next run", "Runs", "Origin"],
+    ["ID", "Name", "P", "Status", "On", "Schedule", "Next run", "Runs", "Origin"],
     automations.map((automation) =>
       "problem" in automation
         ? automation.problem === "missing-agent-prompt"
           ? [
               automation.id,
               automation.name,
+              `P${automation.priority}`,
               "Prompt required",
               automation.enabled ? "yes" : "no",
               formatAutomationTrigger(automation),
@@ -850,6 +918,7 @@ function printAutomationTable(automations: AutomationReadResult[]): string {
           : [
               automation.id,
               automation.name,
+              "-",
               "Invalid data",
               "-",
               "-",
@@ -860,6 +929,7 @@ function printAutomationTable(automations: AutomationReadResult[]): string {
         : [
             automation.id,
             automation.name,
+            `P${automation.priority}`,
             "-",
             automation.enabled ? "yes" : "no",
             formatAutomationTrigger(automation),
@@ -885,21 +955,26 @@ function printRunTable(runs: AutomationRunResponse[]): string {
 }
 
 function helpText(): string {
-  return `Loop commands (room-cli loop is the same command)
+  return `Loop commands (room-cli automation is the same command)
 
-room-cli automation list --project <id>          Also lists the Cloud loops whose thread is in that project
-room-cli automation create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] [--permission-mode accept-edits|auto|full] | --script <inline> | --script-file <path> [--host <name-or-id>])
-room-cli automation show <automationId> --project <id>
-room-cli automation update <automationId> --project <id> [--name <name>] [schedule flags] [--prompt <text>] [--provider <id>] [--model <model>] [--reasoning <level>] [--service-tier default|fast|none] [--permission-mode accept-edits|auto|full] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] [--script <inline> | --script-file <path>] [--interpreter <name>] [--timeout <ms>] [--env-json <json>] (omitted settings are kept; switching between agent and script replaces them)
-room-cli automation pause <automationId> --project <id>
-room-cli automation resume <automationId> --project <id>
-room-cli automation run <automationId> --project <id> [--idempotency-key <key>]
-room-cli automation runs <automationId> --project <id> [--limit <count>] [--output <runId>]
-room-cli automation delete <automationId> --project <id> --yes
-room-cli automation hook <automationId> --project <id>   Replace a webhook loop's secret URL
-room-cli automation review [--all]                List what loops did in the last 7 days (threads they started, script output, failures)
-room-cli automation review mark <itemId...> [--undo]
+room-cli loop list --project <id>          Also lists the Cloud loops whose thread is in that project
+room-cli loop create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] [--permission-mode accept-edits|auto|full] | --script <inline> | --script-file <path> [--host <name-or-id>]) [--priority 1-4]
+room-cli loop create --template <id> --project <id> [--cloud] [any flag above]   The template fills in the rest
+room-cli loop templates                    Ready-made loops, with their priority, schedule, and agent
+room-cli loop show <loopId> --project <id>
+room-cli loop update <loopId> --project <id> [--name <name>] [--priority 1-4] [schedule flags] [--prompt <text>] [--provider <id>] [--model <model>] [--reasoning <level>] [--service-tier default|fast|none] [--permission-mode accept-edits|auto|full] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] [--script <inline> | --script-file <path>] [--interpreter <name>] [--timeout <ms>] [--env-json <json>] (omitted settings are kept; switching between agent and script replaces them)
+room-cli loop pause <loopId> --project <id>
+room-cli loop resume <loopId> --project <id>
+room-cli loop run <loopId> --project <id> [--idempotency-key <key>]
+room-cli loop runs <loopId> --project <id> [--limit <count>] [--output <runId>]
+room-cli loop delete <loopId> --project <id> --yes
+room-cli loop hook <loopId> --project <id>   Replace a webhook loop's secret URL
+room-cli loop review [--all]                List what loops did in the last 7 days (threads they started, script output, failures)
+room-cli loop review mark <itemId...> [--undo]
+room-cli loop report --outcome done|acted|needs-you|failed --confidence high|medium|low --reason TEXT [--action TEXT]...   Inside a loop run: record what it did and why
+room-cli loop settings [--stop-at-limit on|off]   Cloud loops wait while their agent is at its plan limit (on by default)
 
+Priority is P1 (essential) to P4 (niche); loops start at P3, or at their template's.
 Cloud loops run on Cloudroom's servers, even while this Mac is off: every minute with a script, else at most every
 15 minutes. A --cron run starts a fresh Cloud thread in its own sandbox from that thread's project and agent;
 --same-thread re-prompts the thread instead.
@@ -911,11 +986,13 @@ no output skips the run (exit 0 or 1; other exit codes fail it, 3 in a row pause
 A --webhook loop, Local or Cloud, runs when its secret URL gets a POST: create prints the URL once, and each run gets
 the requests that arrived as data. Cloud runs start within seconds; this Mac checks for Local ones about once a minute,
 and they wait while it is off. A Local webhook loop an agent creates starts paused: a person turns it on in Loops.
-room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) [--new-thread | --same-thread] [--script <inline> | --script-file <path>] [--provider <id>] [--model <model>] [--reasoning <level>]
-room-cli automation list --cloud [--thread <cloudThreadId>]   All Cloud loops, in every project
-room-cli automation show|pause|resume|run|hook <cloudAutomationId>
-room-cli automation update <cloudAutomationId> [--name <name>] [--prompt <text>] [schedule flags] [--script <inline> | --script-file <path> | --no-script] [--provider <id>] [--model <model>] [--reasoning <level>]
-room-cli automation delete <cloudAutomationId> --yes
+room-cli loop create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) [--new-thread | --same-thread] [--script <inline> | --script-file <path>] [--provider <id>] [--model <model>] [--reasoning <level>] [--priority 1-4]
+room-cli loop create --cloud --template <id> --project <id>   Runs from the project's newest Cloud thread, else a new one
+room-cli loop list --cloud [--thread <cloudThreadId>]   All Cloud loops, in every project
+room-cli loop show|pause|resume|run|hook <cloudLoopId>
+room-cli loop runs <cloudLoopId> [--limit <count>]   What each run did, from its loop report
+room-cli loop update <cloudLoopId> [--name <name>] [--priority 1-4] [--prompt <text>] [schedule flags] [--script <inline> | --script-file <path> | --no-script] [--provider <id>] [--model <model>] [--reasoning <level>]
+room-cli loop delete <cloudLoopId> --yes
 `;
 }
 
@@ -937,13 +1014,31 @@ function cloudSchedule(args: ParsedArgs): { cron: string | null; timezone?: stri
     : { cron: null, run_at: new Date(trigger.runAt).toISOString() };
 }
 
+type CloudLoopRun = NonNullable<Awaited<ReturnType<Cloud["automations"]>>["history"]>[number];
+
+function printCloudRuns(runs: CloudLoopRun[]): string {
+  return table(
+    ["Started", "Outcome", "Thread", "Reason"],
+    runs.map((run) => [
+      formatTimestamp(Date.parse(run.started_at)),
+      run.outcome === null
+        ? run.ended_at === null
+          ? "running or unreported"
+          : "-"
+        : `${run.outcome}${run.confidence ? ` (${run.confidence})` : ""}`,
+      run.thread_id,
+      `${run.reason ?? "-"}${run.actions?.length ? ` [${run.actions.join("; ")}]` : ""}`,
+    ]),
+  );
+}
+
 function printCloudAutomation(a: CloudAutomation): string {
   const webhook = !a.cron && !a.run_at;
   const schedule = a.cron ? `${a.cron} (${a.timezone})` : webhook ? "on webhook" : `once at ${a.run_at}`;
   const state = !a.enabled ? "paused" : webhook ? (a.next_run_at ? "running its webhooks" : "waiting for a webhook") : `next run ${a.next_run_at ?? "within a minute"}`;
   const mode = `${a.new_thread ? "new thread per run" : "re-prompts"}${a.script ? " · script" : ""}`;
   const agent = a.agent ? `\n  Agent: ${a.agent.provider} · ${a.agent.model ?? "default model"}${a.agent.reasoning ? ` · ${a.agent.reasoning}` : ""}` : "";
-  return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${agent}${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n${a.url ? webhookNote(a.url) : ""}`;
+  return `${a.id}  ${a.name}  P${a.priority ?? DEFAULT_LOOP_PRIORITY}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${agent}${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n${a.url ? webhookNote(a.url) : ""}`;
 }
 
 async function projectCloudAutomations(bb: Pick<BbPluginApi, "sdk">, projectId: string): Promise<CloudAutomation[]> {
@@ -1001,15 +1096,18 @@ async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, c
   }
   if (args.command === "create") {
     if (args.flags.has("environment")) throw new Error("Cloud loops run in their Cloud thread's project. Drop --environment.");
-    const thread = flag(args, "thread") ?? ctx.threadId;
+    const project = flag(args, "project");
+    const thread = flag(args, "thread") ?? (args.flags.has("template") && project
+      ? await cloudTemplateHost(bb.sdk, { projectId: project, name: requireFlag(args, "name"), providerId: requireFlag(args, "provider"), model: requireFlag(args, "model") })
+      : ctx.threadId);
     if (!thread) throw new Error("Missing required option --thread <cloudThreadId>.");
     const schedule = boolFlag(args, "webhook") && buildTrigger(args).triggerType === "webhook" ? { webhook: true as const } : cloudSchedule(args);
     if (!schedule) throw new Error("Provide exactly one trigger flag: --cron, --at, --in, or --webhook.");
     return one({ action: "create", thread, name: requireFlag(args, "name"), prompt: requireFlag(args, "prompt"), ...schedule, enabled: !boolFlag(args, "disabled"),
-      ...(boolFlag(args, "new-thread") ? { new_thread: true } : boolFlag(args, "same-thread") ? { new_thread: false } : {}), ...await cloudScript(bb, args, ctx), ...cloudAgent(args) }, "created");
+      ...(boolFlag(args, "new-thread") ? { new_thread: true } : boolFlag(args, "same-thread") ? { new_thread: false } : {}), ...await cloudScript(bb, args, ctx), ...cloudAgent(args), ...parsePriority(args) }, "created");
   }
   if (args.command === "update") {
-    const fields = { ...(flag(args, "name") ? { name: flag(args, "name") } : {}), ...(flag(args, "prompt") ? { prompt: flag(args, "prompt") } : {}), ...cloudSchedule(args), ...await cloudScript(bb, args, ctx), ...cloudAgent(args) };
+    const fields = { ...(flag(args, "name") ? { name: flag(args, "name") } : {}), ...(flag(args, "prompt") ? { prompt: flag(args, "prompt") } : {}), ...cloudSchedule(args), ...await cloudScript(bb, args, ctx), ...cloudAgent(args), ...parsePriority(args) };
     return one({ action: "update", id: requireId(), ...fields }, "updated");
   }
   if (args.command === "pause" || args.command === "resume") return one({ action: "update", id: requireId(), enabled: args.command === "resume" }, args.command === "pause" ? "paused" : "resumed");
@@ -1024,8 +1122,22 @@ async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, c
     await cloud.automations({ action: "delete", id: requireId() });
     return { exitCode: 0, stdout: optionalJson(args, { ok: true, id }) ?? `Cloud loop ${id} deleted\n` };
   }
-  if (args.command === "runs") throw new Error("Each cloud run is a message in its Cloud thread. Read the thread instead.");
+  if (args.command === "runs") {
+    const { history = [] } = await cloud.automations({ action: "history", id: requireId(), limit: Math.min(parseLimit(args, 20), 100) });
+    return { exitCode: 0, stdout: optionalJson(args, history) ?? (history.length ? printCloudRuns(history) : "No runs recorded yet\n") };
+  }
   throw new Error(`Unknown loop command: ${args.command}`);
+}
+
+/** Stop at plan limit (ADR 0292): an account setting for Cloud loops. */
+async function runSettingsCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs): Promise<PluginCliResult> {
+  const value = optionalFlag(args, "stop-at-limit");
+  if (value !== undefined && value !== "on" && value !== "off") throw new Error("Use --stop-at-limit on or off.");
+  const { stop_at_limit: stop } = await bb.sdk.cloudroom.automations({ action: "settings", ...(value ? { stop_at_limit: value === "on" } : {}) });
+  return {
+    exitCode: 0,
+    stdout: optionalJson(args, { stop_at_limit: stop }) ?? `Stop at plan limit: ${stop === false ? "off" : "on"}\n  On: Cloud loops wait while their agent is at its plan limit or would spend extra credits.\n`,
+  };
 }
 
 function printReview(items: readonly ReviewItem[]): string {
@@ -1069,75 +1181,110 @@ async function runReviewCommand(
   };
 }
 
+/** `room-cli loop report` (ADR 0298). Each `--action` counts, so the raw arguments are read for them. */
+async function runReportCommand(
+  service: AutomationService,
+  argv: string[],
+  args: ParsedArgs,
+  ctx: PluginCliContext,
+): Promise<PluginCliResult> {
+  if (!ctx.threadId) throw new Error("Run room-cli loop report from inside a loop run's thread.");
+  const actions = argv.flatMap((arg, index) => (arg === "--action" && argv[index + 1] !== undefined ? [argv[index + 1]!] : []));
+  await service.report({
+    threadId: ctx.threadId,
+    outcome: requireFlag(args, "outcome"),
+    confidence: requireFlag(args, "confidence"),
+    reason: requireFlag(args, "reason"),
+    actions,
+  });
+  return { exitCode: 0, stdout: optionalJson(args, { reported: true }) ?? "Loop run reported\n" };
+}
+
 export function registerAutomationCli(args: {
   bb: Pick<BbPluginApi, "cli" | "sdk">;
   service: AutomationService;
 }): void {
   const { bb, service } = args;
   bb.cli.register({
-    name: "automation",
-    summary: "Inspect and manage loops: scheduled agent and script runs (`room-cli loop` works too)",
+    name: "loop",
+    summary: "Create and manage loops: scheduled agent and script runs, Local and Cloud (`room-cli automation` works too)",
     commands: [
       {
         name: "list",
         summary: "List a project's Local and Cloud loops",
-        usage: "room-cli automation list --project <id> [--json]",
+        usage: "room-cli loop list --project <id> [--json]",
       },
       {
         name: "create",
-        summary: "Create a loop",
+        summary: "Create a loop, or add one from a template",
         usage:
-          "room-cli automation create --project <id> --name <name> [schedule flags] [mode flags]",
+          "room-cli loop create --project <id> --name <name> [schedule flags] [mode flags] [--priority 1-4] | room-cli loop create --template <id> --project <id> [--cloud]",
+      },
+      {
+        name: "templates",
+        summary: "List ready-made loops",
+        usage: "room-cli loop templates [--json]",
       },
       {
         name: "show",
         summary: "Show loop details",
-        usage: "room-cli automation show <automationId> --project <id> [--json]",
+        usage: "room-cli loop show <loopId> --project <id> [--json]",
       },
       {
         name: "update",
         summary: "Update loop configuration",
         usage:
-          "room-cli automation update <automationId> --project <id> [flags] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (omitted settings are kept)",
+          "room-cli loop update <loopId> --project <id> [--priority 1-4] [flags] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (omitted settings are kept)",
       },
       {
         name: "pause",
         summary: "Pause a loop",
-        usage: "room-cli automation pause <automationId> --project <id> [--json]",
+        usage: "room-cli loop pause <loopId> --project <id> [--json]",
       },
       {
         name: "resume",
         summary: "Resume a loop",
-        usage: "room-cli automation resume <automationId> --project <id> [--json]",
+        usage: "room-cli loop resume <loopId> --project <id> [--json]",
       },
       {
         name: "run",
         summary: "Run a loop now",
         usage:
-          "room-cli automation run <automationId> --project <id> [--idempotency-key <key>] [--json]",
+          "room-cli loop run <loopId> --project <id> [--idempotency-key <key>] [--json]",
       },
       {
         name: "hook",
         summary: "Replace a webhook loop's secret URL",
-        usage: "room-cli automation hook <automationId> --project <id> [--json]",
+        usage: "room-cli loop hook <loopId> --project <id> [--json]",
       },
       {
         name: "runs",
         summary: "List loop runs",
         usage:
-          "room-cli automation runs <automationId> --project <id> [--limit <count>] [--output <runId>] [--json]",
+          "room-cli loop runs <loopId> --project <id> [--limit <count>] [--output <runId>] [--json]",
       },
       {
         name: "review",
         summary: "List what loops did on their own, and mark items reviewed",
         usage:
-          "room-cli automation review [--all] [--json] | room-cli automation review mark <itemId...> [--undo]",
+          "room-cli loop review [--all] [--json] | room-cli loop review mark <itemId...> [--undo]",
+      },
+      {
+        name: "report",
+        summary: "Inside a loop run: record what it did, why, and how sure it was",
+        usage:
+          'room-cli loop report --outcome done|acted|needs-you|failed --confidence high|medium|low --reason "..." [--action "..."]...',
       },
       {
         name: "delete",
         summary: "Delete a loop",
         usage:
-          "room-cli automation delete <automationId> --project <id> --yes [--json]",
+          "room-cli loop delete <loopId> --project <id> --yes [--json]",
+      },
+      {
+        name: "settings",
+        summary: "Read or set whether Cloud loops stop at plan limits",
+        usage: "room-cli loop settings [--stop-at-limit on|off] [--json]",
       },
     ],
     async run(argv: string[], ctx: PluginCliContext): Promise<PluginCliResult> {
@@ -1147,8 +1294,14 @@ export function registerAutomationCli(args: {
         if (command === "help" || command === "--help" || command === "-h") {
           return { exitCode: 0, stdout: helpText() };
         }
+        if (command === "templates") {
+          return { exitCode: 0, stdout: optionalJson(parsed, LOOP_TEMPLATES) ?? printTemplates() };
+        }
+        if (command === "settings") return await runSettingsCommand(bb, parsed);
+        if (command === "create") applyTemplate(parsed);
         if (isCloudCommand(parsed)) return await runCloudCommand(bb, parsed, ctx);
         if (command === "review") return await runReviewCommand(service, parsed);
+        if (command === "report") return await runReportCommand(service, argv, parsed, ctx);
         if (command === "list") {
           const projectId = requireFlag(parsed, "project");
           const result = service.list({ projectId });
@@ -1189,6 +1342,7 @@ export function registerAutomationCli(args: {
             execution,
             origin: ctx.threadId ? "agent" : "human",
             ...(ctx.threadId ? { createdByThreadId: ctx.threadId } : {}),
+            ...parsePriority(parsed),
           };
           const created = await service.create(request);
           const json = optionalJson(parsed, created);
@@ -1301,18 +1455,10 @@ export function registerAutomationCli(args: {
         if (command === "runs") {
           const automationId = parsed.positionals[0];
           if (!automationId) throw new Error("Missing automationId.");
-          const limitText = flag(parsed, "limit");
-          const limit =
-            limitText === undefined
-              ? undefined
-              : Number.parseInt(limitText, 10);
-          if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
-            throw new Error("--limit must be a positive integer.");
-          }
           const result = service.runs({
             projectId: requireFlag(parsed, "project"),
             automationId,
-            limit: limit ?? 50,
+            limit: parseLimit(parsed, 50),
           });
           const outputRunId = flag(parsed, "output");
           if (outputRunId) {

@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@cloudroom/shared-ui/button";
@@ -150,7 +151,7 @@ export function NewPhoneAppBanner() {
     >
       <Icon name="Smartphone" className="size-4 shrink-0 text-primary" aria-hidden />
       <span className="min-w-0 flex-1 truncate">
-        <strong>Cloudroom has a new phone app.</strong> It works with your Mac off.
+        <strong>Cloudroom has a new phone app.</strong> It works with your {COMPUTER} off.
       </span>
       <Button size="sm" asChild>
         <a href="https://www.cloudroom.dev/m">Get it</a>
@@ -190,7 +191,7 @@ export function ComputerFallbackBanner() {
           </>
         ) : (
           <>
-            <strong>{fallback.name} is offline.</strong> You're using this Mac
+            <strong>{fallback.name} is offline.</strong> You're using this {COMPUTER}
             until it's back.
           </>
         )}
@@ -203,7 +204,7 @@ export function ComputerFallbackBanner() {
         variant="ghost"
         onClick={() => void desktopApi.openComputer?.(null)}
       >
-        Use this Mac
+        Use this {COMPUTER}
       </Button>
     </div>
   );

@@ -11,6 +11,7 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { CloudroomAccountPanels } from "./components/CloudroomAccountPanels";
 import { Onboarding } from "./components/Onboarding";
 import { InviteOffer } from "./components/InviteOffer";
+import { ActivationChecklist } from "./components/ActivationChecklist";
 import { SharedThreadOpener } from "./components/SharedThreadOpener";
 import { InstallAppSheet } from "./components/InstallAppSheet";
 import { AuthCallbackView } from "./views/AuthCallbackView";
@@ -447,6 +448,7 @@ export function App() {
                 <Route path="*" element={<AppRoutes />} />
               </Routes>
               <ProviderCliInstallLogDialogHost />
+              <ActivationChecklist />
               <Onboarding />
               <InviteOffer />
               <SharedThreadOpener />

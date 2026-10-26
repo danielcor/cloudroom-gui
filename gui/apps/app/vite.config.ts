@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { appFiles } from "./vite-app-files.js";
 import { bundleStats } from "./vite-bundle-stats.js";
 import { fontPreload } from "./vite-font-preload.js";
 import { sharedUiEnvSeam } from "./vite-shared-ui-seam.js";
@@ -18,6 +19,7 @@ export const sharedViteConfig = {
     tailwindcss(),
     bundleStats(),
     fontPreload(),
+    appFiles(),
   ],
   cacheDir: "node_modules/.vite/app",
   build: {

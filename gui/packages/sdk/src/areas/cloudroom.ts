@@ -31,6 +31,8 @@ export interface CloudroomStatus {
   macAccess?: boolean | null;
   /** How much cloud agents may do on this computer (ADR 0186); null until first-run setup asks. */
   macAccessLevel?: MacAccessLevel | null;
+  /** The levels this computer supports: macOS has all four, Linux only Off and Full. Missing from older servers. */
+  macAccessLevels?: readonly MacAccessLevel[];
   /** Copy this computer's logins, API keys, and model providers to the VM (ADR 0130); null until first-run setup asks. */
   copyLogins?: boolean | null;
   /** Agent logins found on this computer. Claude's is checked through its provider plugin. */
@@ -41,8 +43,8 @@ export interface CloudroomStatus {
   cloudQueue?: { position: number; total: number; regionBlocked: boolean } | null;
   /** The account's plan (free, pro, super, ultra) from the website's mode check; null while billing is off or unknown. */
   plan?: string | null;
-  /** A Free or Pro account's 30-day usage, for the sidebar upgrade card. Null for other plans or while in the cloud queue. */
-  planUsage?: { plan: "free" | "pro"; agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number } | null;
+  /** The account's 30-day usage: Free's sidebar card, paid plans' meter from 75%. Null while billing is off or in the cloud queue. */
+  planUsage?: { plan: string; agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number; og?: { name: string | null; endsAt: string } | null } | null;
 }
 
 export interface CloudroomCodexAuth {
@@ -133,9 +135,21 @@ export interface CloudAutomation {
   /** A fresh-thread loop's own agent (app provider ID; null model is the agent's default). Null for same-thread loops,
    *  which use their thread's, or until its settings are saved. Missing from older websites. */
   agent?: { provider: string; model: string | null; reasoning: string | null } | null;
+  /** P1-P4 (docs/scopes/loops.md). Missing until the website's 0094 update. */
+  priority?: number;
+}
+/** One Cloud loop run's record (ADR 0298): what its agent reported, or null fields while it runs or never reported. */
+export interface CloudLoopRun {
+  thread_id: string;
+  started_at: string;
+  ended_at: string | null;
+  outcome: string | null;
+  confidence: string | null;
+  reason: string | null;
+  actions: string[] | null;
 }
 /** `harness` is Core's harness name or the app's provider ID; only fresh-thread loops pick an agent. */
-export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean; script?: string | null; new_thread?: boolean; webhook?: true; harness?: string; model?: string; reasoning?: string };
+export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean; script?: string | null; new_thread?: boolean; webhook?: true; harness?: string; model?: string; reasoning?: string; priority?: number };
 /** Webhook events the website holds for one Local webhook loop on this Mac (ADR 0262). Ack the batch once its run starts. */
 export interface CloudHookBatch {
   local: string;
@@ -147,11 +161,22 @@ export type CloudAutomationRequest =
   | ({ action: "create"; thread: string } & CloudAutomationFields)
   | ({ action: "update"; id: string } & CloudAutomationFields)
   | { action: "run" | "delete" | "hook"; id: string }
+  // A cloud loop's run threads from the last 7 days, for its usage estimate (docs/scopes/loops.md).
+  | { action: "runs"; id: string }
+  // A cloud loop's newest run records (ADR 0298), for `room-cli loop runs ID`.
+  | { action: "history"; id: string; limit?: number }
   // Webhook loops (ADR 0262): a Local loop's URL, its removal, the events waiting for this Mac's loops, and their ack.
   | { action: "hook" | "unhook"; local: string }
   | { action: "events"; local: string[] }
-  | { action: "ack"; batches: string[] };
-export type CloudAutomationResponse = { automations?: CloudAutomation[]; automation?: CloudAutomation; ok?: boolean; url?: string; batches?: CloudHookBatch[]; recheck_ms?: number };
+  | { action: "ack"; batches: string[] }
+  // Stop loops at plan limits (ADR 0292): read the account's switch, or set it with `stop_at_limit`.
+  | { action: "settings"; stop_at_limit?: boolean }
+  // Loop run records (ADR 0298): a Local loop run's `room-cli loop report`, saved with Cloud runs.
+  | { action: "report"; local: string; run: string; thread: string; name: string; started_at: string; outcome: string; confidence: string; reason: string; actions: string[] };
+export type CloudAutomationResponse = { automations?: CloudAutomation[]; automation?: CloudAutomation; ok?: boolean; url?: string; batches?: CloudHookBatch[]; recheck_ms?: number; stop_at_limit?: boolean; runs?: string[]; history?: CloudLoopRun[]; reported?: boolean };
+/** Weighted tokens the listed threads used since `threadsSince`, and all of the provider's threads since `totalSince`. */
+export type TokenUsageRequest = { providerId: string; threadIds: string[]; threadsSince: number; totalSince: number };
+export type TokenUsageResponse = { total: number; threads: Record<string, number> };
 
 /** A skill on this Mac. `cloud` means every new cloud thread gets it. */
 export interface CloudSkill {
@@ -234,6 +259,8 @@ export interface CloudroomArea {
   autoDelete(signal?: AbortSignal): Promise<AutoDeleteSetting>;
   /** Lists, creates, changes, runs, or deletes cloud automations. */
   automations(input: CloudAutomationRequest): Promise<CloudAutomationResponse>;
+  /** Loop usage estimates (docs/scopes/loops.md): tokens a loop's runs used, and all of the provider's. */
+  tokenUsage(input: TokenUsageRequest): Promise<TokenUsageResponse>;
   /** Organizations (docs/scopes/organizations.md): passes one request to the website's `/api/desktop/org`, signed in as this account. */
   org(input: { action: string } & Record<string, unknown>): Promise<unknown>;
   setAutoDelete(days: AutoDeleteDays): Promise<AutoDeleteSetting>;
@@ -365,6 +392,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     updateEnvironment: (change) => transport.readJson(request("/environment", change)) as Promise<CloudEnvironment>,
     autoDelete: (signal) => transport.readJson(request("/auto-delete", undefined, signal)) as Promise<AutoDeleteSetting>,
     automations: (input) => transport.readJson(request("/automations", input)) as Promise<CloudAutomationResponse>,
+    tokenUsage: (input) => transport.readJson(request("/token-usage", input)) as Promise<TokenUsageResponse>,
     org: (input) => transport.readJson(request("/org", input)),
     setAutoDelete: (days) => transport.readJson(request("/auto-delete", { days })) as Promise<AutoDeleteSetting>,
     macVariables: (signal) => transport.readJson(request("/environment/mac", undefined, signal)) as Promise<{ names: string[] }>,

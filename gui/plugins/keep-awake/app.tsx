@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { useEffect, useRef, useState } from "react";
 import {
   definePluginApp,
@@ -148,8 +149,8 @@ function KeepAwakeSettings() {
             Prevent sleep
           </h3>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Keep selected Macs and their screens awake while Cloudroom is running.
-            Closing the lid or choosing Sleep still sleeps the Mac.
+            Keep selected {COMPUTER}s and their screens awake while Cloudroom is running.
+            Closing the lid or choosing Sleep still sleeps the {COMPUTER}.
           </p>
         </div>
         <Switch
@@ -167,7 +168,7 @@ function KeepAwakeSettings() {
           <div className="border-t border-border/60 pt-4">
             <h3 className="text-sm font-medium text-foreground">Hosts</h3>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Choose which Macs to keep awake.
+              Choose which {COMPUTER}s to keep awake.
             </p>
             <RadioGroup
               className="mt-2 gap-1"
@@ -214,7 +215,7 @@ function KeepAwakeSettings() {
                     Specific hosts
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    Choose individual Macs below.
+                    Choose individual {COMPUTER}s below.
                   </span>
                 </span>
               </label>

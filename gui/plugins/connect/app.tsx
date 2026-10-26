@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   definePluginApp,
@@ -514,7 +515,7 @@ function PhoneTab({ status }: { status: ConnectStatus }) {
   if (!status.paired) {
     return (
       <p className="text-sm text-muted-foreground">
-        Your phone can reach this Mac once Cloudroom Connect is ready.
+        Your phone can reach this {COMPUTER} once Cloudroom Connect is ready.
       </p>
     );
   }
@@ -525,7 +526,7 @@ function PhoneTab({ status }: { status: ConnectStatus }) {
       <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
         Tip: add it to your Home Screen. On iPhone, tap Share, then Add to Home
         Screen. On Android, open the browser menu and tap Install app.
-        {connected ? "" : " Your phone reaches this Mac while Cloudroom is open and the Mac is awake."}
+        {connected ? "" : ` Your phone reaches this ${COMPUTER} while Cloudroom is open and the ${COMPUTER} is awake.`}
       </p>
       {status.url !== null ? (
         <div className="flex items-center gap-4 rounded-lg border border-border px-4 py-3">

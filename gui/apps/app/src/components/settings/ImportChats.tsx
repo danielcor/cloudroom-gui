@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@cloudroom/shared-ui/dropdown-menu";
 import { Icon } from "@cloudroom/shared-ui/icon";
@@ -52,11 +53,11 @@ export function ImportChats({ onStart, empty }: { onStart?: () => void; empty?: 
   const [off, setOff] = useState<Set<Harness>>(new Set());
   const [progress, setProgress] = useState({ done: 0, total: 0 });
 
-  if (sessions.isPending) return <p className="text-sm text-(--ic-muted)" style={PALETTE}>Looking for chats on this Mac…</p>;
+  if (sessions.isPending) return <p className="text-sm text-(--ic-muted)" style={PALETTE}>Looking for chats on this {COMPUTER}…</p>;
   if (sessions.error) return <p role="alert" className="text-sm text-destructive">{sessions.error.message}</p>;
   const list = sessions.data.sessions;
   const apps = APPS.filter(([id]) => list.some((session) => session.harness === id));
-  if (!apps.length) return empty ?? <p className="text-sm text-(--ic-muted)" style={PALETTE}>No new agent chats on this Mac.</p>;
+  if (!apps.length) return empty ?? <p className="text-sm text-(--ic-muted)" style={PALETTE}>No new agent chats on this {COMPUTER}.</p>;
 
   const recent = list.filter((session) => days === null || Date.now() - session.updatedAt < days * DAY_MS);
   const picked = apps.filter(([id]) => !off.has(id));
@@ -80,7 +81,7 @@ export function ImportChats({ onStart, empty }: { onStart?: () => void; empty?: 
     </DropdownMenuItem>
   ));
   const start = () => {
-    if (!localHostId) return appToast.error("This Mac is not connected yet. Try again in a moment.");
+    if (!localHostId) return appToast.error(`This ${COMPUTER} is not connected yet. Try again in a moment.`);
     setProgress({ done: 0, total: chosen.length });
     // mutateAsync, not mutate callbacks: the toasts still show after this screen closes.
     importSessions.mutateAsync({ hostId: localHostId, sessions: chosen.map(({ harness, id }) => ({ harness, id })), onProgress: (done) => setProgress((current) => ({ ...current, done })) }).then(

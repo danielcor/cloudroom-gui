@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
 
-export type UpgradePrompt = "limit_notice" | "queue" | "queue_badge" | "plan_card" | "free_tip" | "auto_delete" | "try_cloud" | "new_thread_cloud";
+export type UpgradePrompt = "limit_notice" | "queue" | "queue_badge" | "plan_card" | "free_tip" | "auto_delete" | "try_cloud" | "new_thread_cloud" | "og_letter";
 
 export function reportUpgradePromptClick(where: UpgradePrompt): void {
   report(where, "clicked");
@@ -22,7 +22,7 @@ export function useUpgradePromptViewed(where: UpgradePrompt | null): void {
   }, [where]);
 }
 
-export function openUpgrade(where: UpgradePrompt): void {
+export function openUpgrade(where: UpgradePrompt, url = "https://www.cloudroom.dev/billing"): void {
   report(where, "clicked");
-  openUrlInExternalBrowser("https://www.cloudroom.dev/billing");
+  openUrlInExternalBrowser(url);
 }

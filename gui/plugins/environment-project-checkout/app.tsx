@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { StartBranchPicker } from "@cloudroom/shared-ui/branch-picker-primitives";
 import {
@@ -175,7 +176,7 @@ function CheckoutInputsControl({
           ? []
           : [
               {
-                label: "On this Mac",
+                label: `On this ${COMPUTER}`,
                 icon: "GitMerge" as const,
                 branches: localBranches,
               },

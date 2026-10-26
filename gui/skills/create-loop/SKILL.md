@@ -25,13 +25,13 @@ The user describes the job in a sentence. Fill in everything else from the defau
 3. **Create it.** Write the prompt to `/tmp/<name>-prompt.txt`, then:
 
    ```bash
-   room-cli automation create --project "$ROOM_PROJECT_ID" --name "<Name> (every 4 hours)" \
+   room-cli loop create --project "$ROOM_PROJECT_ID" --name "<Name> (every 4 hours)" \
      --cron "0 */4 * * *" --timezone <zone> \
      --provider <id> --model '<model>' --reasoning <level> \
      --environment "<main checkout>" --prompt "$(cat /tmp/<name>-prompt.txt)" --json
    ```
 
-4. **Test it once.** `room-cli automation run ID --project "$ROOM_PROJECT_ID"`, then `room-cli automation runs ID --project "$ROOM_PROJECT_ID" --limit 1 --json` gives its thread. Confirm it started and renamed itself.
+4. **Test it once.** `room-cli loop run ID --project "$ROOM_PROJECT_ID"`, then `room-cli loop runs ID --project "$ROOM_PROJECT_ID" --limit 1 --json` gives its thread. Confirm it started and renamed itself.
 5. **Tell the user** the loop's name, schedule, and test thread, plus anything surprising from step 1.
 
 ## Prompt template

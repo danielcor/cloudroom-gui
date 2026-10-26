@@ -1,3 +1,4 @@
+import { COMPUTER, COMPUTER_TITLE } from "@cloudroom/domain";
 import type { MacAccessLevel } from "@cloudroom/sdk/browser";
 import { Button } from "@cloudroom/shared-ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@cloudroom/shared-ui/dropdown-menu";
@@ -9,11 +10,13 @@ import { appToast } from "@/components/ui/app-toast";
 import { useCloudroomAccount, useSetMacAccess } from "@/hooks/queries/cloudroom-queries";
 
 export const MAC_ACCESS_LEVELS: { id: MacAccessLevel; label: string; description: string; icon: string; dot: string }[] = [
-  { id: "off", label: "Off", description: "Cloud agents can't touch this Mac.", icon: "Unavailable", dot: "bg-subtle-foreground/60" },
+  { id: "off", label: "Off", description: `Cloud agents can't touch this ${COMPUTER}.`, icon: "Unavailable", dot: "bg-subtle-foreground/60" },
   { id: "read-only", label: "Read", description: "Read files and logs. No changes.", icon: "Eye", dot: "bg-timeline-accent" },
   { id: "ask", label: "Ask", description: "Changes need your one-tap OK.", icon: "SecurityCheck", dot: "bg-attention" },
   { id: "full", label: "Full", description: "Run anything, like you would.", icon: "Zap", dot: "bg-success" },
 ];
+
+export const MAC_ACCESS_TITLE = `${COMPUTER_TITLE} access`;
 
 export function useMacAccessLevel() {
   const status = useCloudroomAccount();
@@ -25,7 +28,7 @@ export function useMacAccessLevel() {
   const select = (level: (typeof MAC_ACCESS_LEVELS)[number]) => {
     if (level === current) return;
     macAccess.mutate(level.id, {
-      onSuccess: () => appToast.success(`Mac access: ${level.label}`),
+      onSuccess: () => appToast.success(`${MAC_ACCESS_TITLE}: ${level.label}`),
       onError: (error) => appToast.error(error.message),
     });
   };
@@ -38,29 +41,32 @@ export function MacAccessMenu() {
     <Tooltip>
       <TooltipTrigger asChild>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="h-6 gap-1.5 rounded-full bg-foreground/[0.06] pr-2.5 pl-2 text-xs font-normal text-muted-foreground hover:bg-foreground/10 hover:text-foreground data-[state=open]:bg-foreground/10 data-[state=open]:text-foreground" aria-label={`Mac access: ${current.label}`} disabled={saving}>
+          <Button variant="ghost" className="h-6 gap-1.5 rounded-full bg-foreground/[0.06] pr-2.5 pl-2 text-xs font-normal text-muted-foreground hover:bg-foreground/10 hover:text-foreground data-[state=open]:bg-foreground/10 data-[state=open]:text-foreground" aria-label={`${MAC_ACCESS_TITLE}: ${current.label}`} disabled={saving}>
             <span className={cn("size-1.5 shrink-0 rounded-full", current.dot)} aria-hidden />
             {current.label}
           </Button>
         </DropdownMenuTrigger>
       </TooltipTrigger>
-      <TooltipContent side="top">Mac access: {current.label}</TooltipContent>
+      <TooltipContent side="top">{MAC_ACCESS_TITLE}: {current.label}</TooltipContent>
     </Tooltip>
-    <DropdownMenuContent side="top" align="end" sideOffset={6} mobileTitle="Mac access" className="w-72 p-1.5">
-      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Mac access</DropdownMenuLabel>
+    <DropdownMenuContent side="top" align="end" sideOffset={6} mobileTitle={MAC_ACCESS_TITLE} className="w-72 p-1.5">
+      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{MAC_ACCESS_TITLE}</DropdownMenuLabel>
       <MacAccessMenuItems current={current} select={select} />
     </DropdownMenuContent>
   </DropdownMenu>;
 }
 
 export function MacAccessMenuItems({ current, select }: Pick<ReturnType<typeof useMacAccessLevel>, "current" | "select">) {
+  // The computer says which levels it supports: Read and Ask need macOS.
+  const supported = useCloudroomAccount().data?.macAccessLevels;
   return MAC_ACCESS_LEVELS.map((level) => {
     const selected = level === current;
-    return <DropdownMenuItem key={level.id} role="menuitemradio" aria-checked={selected} className={cn("items-start gap-2.5 py-2", selected && "bg-state-hover")} onSelect={() => select(level)}>
+    const disabled = !!supported && !supported.includes(level.id);
+    return <DropdownMenuItem key={level.id} role="menuitemradio" aria-checked={selected} disabled={disabled} className={cn("items-start gap-2.5 py-2", selected && "bg-state-hover")} onSelect={() => select(level)}>
       <Icon name={level.icon} className="mt-0.5 text-muted-foreground" aria-hidden />
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-foreground">{level.label}</span>
-        <span className="block text-xs text-muted-foreground">{level.description}</span>
+        <span className="block text-xs text-muted-foreground">{disabled ? "Needs macOS." : level.description}</span>
       </span>
       {selected && <Icon name="Check" className="mt-0.5 text-foreground" aria-hidden />}
     </DropdownMenuItem>;

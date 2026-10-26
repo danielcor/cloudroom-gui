@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 124
+
+A checklist for your first week (2026-10-25)
+
+### Changes
+
+- A short checklist shows 5 steps that get the most out of Cloudroom, like starting a Cloud agent.
+- The Loops page has a new header that shows how your loops are running.
+- Loops remember their past runs, including what each run did and how sure it was.
+- Cloud loops can stop at your plan limit, so they never use extra credits.
+- `room-cli loop` sets priority, adds loops from templates, and shows Cloud run history.
+- The phone app keeps working with Cloud threads while your Mac is off.
+- Security fixes.
+
 ## 123
 
 Hand off long Local runs (2026-10-25)

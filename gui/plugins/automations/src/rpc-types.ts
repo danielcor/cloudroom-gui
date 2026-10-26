@@ -260,12 +260,18 @@ const agentExecutionUpdateSchema = z
   );
 export type AgentExecutionUpdate = z.infer<typeof agentExecutionUpdateSchema>;
 
+/** P1-P4: how much a loop matters (docs/scopes/loops.md, Priority groups). */
+export const loopPrioritySchema = z.number().int().min(1).max(4);
+export type LoopPriority = 1 | 2 | 3 | 4;
+export const DEFAULT_LOOP_PRIORITY: LoopPriority = 3;
+
 export const automationResponseSchema = z
   .object({
     id: z.string(),
     projectId: z.string(),
     name: z.string(),
     enabled: z.boolean(),
+    priority: loopPrioritySchema,
     trigger: automationTriggerSchema,
     execution: automationResponseExecutionSchema,
     origin: automationOriginSchema,
@@ -354,6 +360,7 @@ export const createAutomationInputSchema = z
     execution: automationExecutionRequestSchema,
     origin: automationOriginSchema,
     createdByThreadId: z.string().min(1).optional(),
+    priority: loopPrioritySchema.optional(),
   })
   .strict();
 export type CreateAutomationInput = z.input<typeof createAutomationInputSchema>;
@@ -369,6 +376,7 @@ export const updateAutomationInputSchema = z
     trigger: automationTriggerSchema.optional(),
     execution: automationExecutionRequestSchema.optional(),
     agent: agentExecutionUpdateSchema.optional(),
+    priority: loopPrioritySchema.optional(),
   })
   .strict()
   .refine(
@@ -376,7 +384,8 @@ export const updateAutomationInputSchema = z
       value.name !== undefined ||
       value.trigger !== undefined ||
       value.execution !== undefined ||
-      value.agent !== undefined,
+      value.agent !== undefined ||
+      value.priority !== undefined,
     { message: "at least one field is required" },
   )
   .refine(

@@ -246,7 +246,7 @@ export async function findDisabledPluginForCommand(
 }
 
 const PLUGIN_COMMAND_ALIASES: Readonly<Record<string, string>> = {
-  loop: "automation",
+  automation: "loop",
 };
 
 export function findPluginCliCommand(

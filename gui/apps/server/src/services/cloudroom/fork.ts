@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
@@ -182,7 +183,7 @@ async function cloudForkSource(deps: Parameters<typeof cloudroom>[0], sourceId: 
 function localForkSource(deps: Parameters<typeof cloudroom>[0], sourceId: string, nativeId: string, harness: string): ForkSource {
   const environmentId = getThread(deps.db, sourceId)?.environmentId;
   const environment = environmentId ? getEnvironment(deps.db, environmentId) : null;
-  if (!environment?.path) throw new ApiError(409, "fork_source_unavailable", "The source thread's folder is not on this Mac.");
+  if (!environment?.path) throw new ApiError(409, "fork_source_unavailable", `The source thread's folder is not on this ${COMPUTER}.`);
   const { hostId, path } = environment;
   const target = { threadId: sourceId, environmentId: environment.id, workspaceContext: workspaceContextFromPath({ path }) };
   return {

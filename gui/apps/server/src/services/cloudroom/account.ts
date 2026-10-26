@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { z } from "zod";
@@ -6,7 +7,7 @@ import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { cloudroom, configuredWebsite, trustedWebsite } from "./commands.js";
 import { cancelGithubLogin } from "./github-login.js";
-import { macAccess } from "./previews.js";
+import { macAccess, supportedMacAccessLevels } from "./previews.js";
 import { hasMacCodexLogin } from "./sandboxes.js";
 import { copyLogins } from "./sync.js";
 import { linkInstall, reportSignInFailed } from "./setup-telemetry.js";
@@ -41,7 +42,7 @@ h1{margin:0 0 20px;font-size:clamp(28px,5vw,40px);font-weight:500;letter-spacing
 ${success
     ? '<div class="next open"><div><strong>Head back to Cloudroom</strong><p>Next, connect Claude Code and Codex in the app. You can close this browser tab.</p></div><a class="button" href="cloudroom://open">Open Cloudroom</a></div>'
     : '<div class="next"><strong>Start sign-in again from the Cloudroom app</strong><p>You can close this browser tab.</p></div>'}
-<p class="local">This page is served by Cloudroom on your Mac.</p>
+<p class="local">This page is served by Cloudroom on your ${COMPUTER}.</p>
 </main></body></html>`;
 }
 
@@ -60,7 +61,7 @@ export class CloudroomAccountService {
   async status() {
     const status = await cloudroom(this.deps).status();
     const macAccessLevel = await macAccess(this.deps);
-    return { ...status, macAccess: macAccessLevel === null ? null : macAccessLevel !== "off", macAccessLevel, copyLogins: await copyLogins(this.deps), localLogins: { codex: await hasMacCodexLogin() }, signingIn: this.pending !== null, signInError: this.error };
+    return { ...status, macAccess: macAccessLevel === null ? null : macAccessLevel !== "off", macAccessLevel, macAccessLevels: supportedMacAccessLevels, copyLogins: await copyLogins(this.deps), localLogins: { codex: await hasMacCodexLogin() }, signingIn: this.pending !== null, signInError: this.error };
   }
 
 

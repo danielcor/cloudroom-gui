@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { connectCredentialSchema, deriveConnectBaseUrl } from "@cloudroom/connect-client";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { ConnectTunnel } from "./tunnel.js";
@@ -120,7 +121,7 @@ export class PhoneRelay {
     );
     if (response.status === 401) {
       void this.check(true);
-      throw new Error("Cloudroom Connect is setting up this Mac again. Try again in a moment.");
+      throw new Error(`Cloudroom Connect is setting up this ${COMPUTER} again. Try again in a moment.`);
     }
     if (!response.ok) {
       throw new Error(`Cloudroom Connect returned HTTP ${response.status}.`);

@@ -21,7 +21,8 @@ const UPGRADES: Record<string, { name: string; price: string; pitch: string }> =
   super: { name: "Ultra", price: "$500/mo", pitch: "Ultra gives you 3× more cloud agents and compute." },
 };
 
-/** Free only upgrades. Paid plans also ask the team, which counts demand for compute credits (ADR 0235). */
+/** Free only upgrades. Paid plans also ask the team, which counts demand for compute credits (ADR 0235).
+ *  No ask until the plan is known, so a Free account never sees it while its plan loads. */
 export function CloudUsageLimitNotice() {
   const ask = useMutation({ mutationFn: askForMoreUsage });
   const plan = useCloudroomAccount().data?.plan ?? null;
@@ -37,7 +38,7 @@ export function CloudUsageLimitNotice() {
             Upgrade to {upgrade.name}<span className="font-normal opacity-70">{upgrade.price}</span><Icon name="ArrowRight" aria-hidden />
           </Button>
         )}
-        {plan !== "free" && (ask.isSuccess
+        {plan && plan !== "free" && (ask.isSuccess
           ? <p role="status" className="text-muted-foreground">Sent. The Cloudroom team will reach out to set up a quick call.</p>
           : <Button type="button" size="sm" variant={upgrade ? "outline" : "default"} disabled={ask.isPending} onClick={() => ask.mutate()}>Ask for more usage</Button>)}
       </div>

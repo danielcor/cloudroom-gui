@@ -1,6 +1,11 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { COMPUTER } from "@cloudroom/domain";
 import { FixPrompt } from "@/components/ui/fix-prompt";
-import { crashFixPrompt } from "@/lib/fix-prompts";
+import { isPhoneRelay, macIsOff } from "@/cloud/cloud-mode";
+import { crashFixPrompt, phoneCrashFixPrompt } from "@/lib/fix-prompts";
+
+const MISSING_CODE =
+  /Importing a module script failed|Failed to fetch dynamically imported module|error loading dynamically imported module|Unable to preload CSS/i;
 
 interface AppErrorBoundaryProps {
   children: ReactNode;
@@ -29,10 +34,44 @@ export class AppErrorBoundary extends Component<
     if (error === null) {
       return this.props.children;
     }
+    if (macIsOff() && MISSING_CODE.test(error.message)) {
+      return (
+        <div className="flex h-dvh w-full items-center justify-center bg-background p-6 text-foreground">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
+            <h1 className="text-base font-medium">
+              This screen needs your {COMPUTER}
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Your phone hasn&apos;t saved this screen yet. Open Cloudroom on
+              your {COMPUTER}, open the app here once, and it will work with the{" "}
+              {COMPUTER}
+              off too. Your Cloud threads still work.
+            </p>
+            <button
+              type="button"
+              className="mt-4 w-full cursor-pointer rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+              onClick={() => window.location.assign("/")}
+            >
+              Back to threads
+            </button>
+          </div>
+        </div>
+      );
+    }
+    const prompt = isPhoneRelay()
+      ? phoneCrashFixPrompt(
+          error.message,
+          window.location.hostname,
+          window.location.pathname,
+          macIsOff(),
+        )
+      : crashFixPrompt(error.message);
     return (
       <div className="flex h-dvh w-full items-center justify-center bg-background p-6 text-foreground">
         <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
-          <h1 className="text-base font-medium">Cloudroom hit an error and stopped</h1>
+          <h1 className="text-base font-medium">
+            Cloudroom hit an error and stopped
+          </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             A reload is safe. Your threads live on the server and an unsent
             draft is kept locally. If this repeats, open the browser console and
@@ -53,7 +92,7 @@ export class AppErrorBoundary extends Component<
           >
             Reload Cloudroom
           </button>
-          <FixPrompt className="mt-4" prompt={crashFixPrompt(error.message)} />
+          <FixPrompt className="mt-4" prompt={prompt} />
         </div>
       </div>
     );

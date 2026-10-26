@@ -68,10 +68,29 @@ function promptInput(input: Data) {
       ];
 }
 
+export const promptText = (input: Data) =>
+  promptInput(input)
+    .map((part) => (part.type === "text" ? text(part.text) : ""))
+    .join("\n")
+    .trim();
+
 export class CloudThreadEvents {
   readonly events: ThreadEventWithMeta[] = [];
   state = "idle";
   cursor = 0;
+  model = "";
+  readonly waiting = new Map<string, { text: string; at: number }>();
+  waitingVersion = 0;
+  private remember(requestId: string, item: { text: string; at: number }) {
+    this.waiting.set(requestId, item);
+    this.waitingVersion++;
+  }
+
+  private forget(requestId: string) {
+    if (this.waiting.delete(requestId)) this.waitingVersion++;
+  }
+
+  readonly promptLog: { requestId: string; text: string }[] = [];
   private readonly prompts = new Map<string, Data>();
   private readonly started = new Set<string>();
   private turnId: string | null = null;
@@ -116,8 +135,38 @@ export class CloudThreadEvents {
     if (record.kind === "receipt") {
       const command = text(data.command);
       const requestId = text(data.request_id);
-      if (command === "prompt" && data.input && requestId)
+      this.model = text(data.model) || this.model;
+      if (command === "prompt" && data.input && requestId) {
+        if (!this.prompts.has(requestId))
+          this.promptLog.push({
+            requestId,
+            text: promptText(object(data.input)),
+          });
         this.prompts.set(requestId, object(data.input));
+      }
+      const target = text(object(data.input).target_request_id);
+      if (target && !["failed", "unknown"].includes(text(data.state))) {
+        if (command === "cancel") this.forget(target);
+        const queued = this.waiting.get(target);
+        const edited = promptText(object(data.input));
+        if (command === "edit" && queued && queued.text !== edited) {
+          this.prompts.set(target, object(data.input));
+          this.remember(target, { ...queued, text: edited });
+        }
+      }
+      const prompt = this.prompts.get(requestId);
+      if (command === "prompt" && prompt) {
+        if (
+          data.state === "accepted" &&
+          !this.started.has(requestId) &&
+          !prompt.teleport_handoff
+        )
+          this.remember(requestId, {
+            text: promptText(prompt),
+            at: record.timestamp_ms ?? Date.now(),
+          });
+        else this.forget(requestId);
+      }
       if (
         ["prompt", "auto"].includes(command) &&
         FINISHED.includes(text(data.state)) &&
@@ -154,6 +203,7 @@ export class CloudThreadEvents {
       if (this.state === "starting_turn" && requestId) {
         this.turnId = requestId;
         const prompt = this.prompts.get(requestId);
+        this.forget(requestId);
         if (prompt && !prompt.teleport_handoff) {
           out.push({
             type: "client/turn/requested",

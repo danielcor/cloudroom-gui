@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { appToast } from "@/components/ui/app-toast";
@@ -12,7 +13,7 @@ export function SharedThreadOpener() {
     if (!desktop?.onOpenLink) return;
     return desktop.onOpenLink((url) => {
       if (!url.startsWith("cloudroom://share/")) return;
-      if (!window.confirm("Continue a shared thread?\n\nSomeone else wrote it. An agent on this Mac will read their messages. Only continue links from people you trust.")) return;
+      if (!window.confirm(`Continue a shared thread?\n\nSomeone else wrote it. An agent on this ${COMPUTER} will read their messages. Only continue links from people you trust.`)) return;
       const toast = appToast.loading("Copying the shared thread…");
       void sdk.cloudroom.continueShare(url).then(
         (thread) => {

@@ -1,3 +1,5 @@
+import { COMPUTER } from "@cloudroom/domain";
+
 const CLI_PATH =
   "/Applications/Cloudroom.app/Contents/Resources/app.asar.unpacked/node_modules/bb-app/host-daemon/dist/room-cli";
 const RELEASES_URL = "https://github.com/davidondrej/cloudroom-gui/releases";
@@ -37,6 +39,9 @@ export const crashFixPrompt = (error: string) =>
     `The Cloudroom desktop app crashed${said(error)}`,
     "Check the logs in ~/.gui-cloudroom/logs/ and `room-cli status --json`.",
   );
+
+export const phoneCrashFixPrompt = (error: string, host: string, page: string, macOff: boolean) =>
+  `The Cloudroom phone app (${host}) crashed on ${page} while my ${COMPUTER} was ${macOff ? "off" : "on"}${said(error)} Tell me what most likely went wrong and how to get it working again. If my ${COMPUTER} is on, check \`room-cli status --json\` there.`;
 
 export const appUpdateFixPrompt = (current: string, latest: string | null) =>
   `Update my Cloudroom desktop app from version ${current} to ${latest ?? "the newest version"}. Download the newest release for this computer from ${RELEASES_URL}, quit Cloudroom, replace the old app (on macOS: /Applications/Cloudroom.app), and reopen it. Do not delete ~/.gui-cloudroom; it holds my data. Confirm the new version when you are done.`;

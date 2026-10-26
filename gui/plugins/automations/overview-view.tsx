@@ -59,10 +59,15 @@ import { AutomationMetadataItem } from "./metadata.js";
 import {
   LoopTemplatesView,
   type LoopTemplatesState,
+  type TemplateProject,
   LOOP_PRIORITY_STYLE,
   LoopGroupDivider,
 } from "./templates-view.js";
-import type { CloudAutomation, CloudAutomationActions } from "./cloud-view.js";
+import {
+  LoopLimitSwitch,
+  type CloudAutomation,
+  type CloudAutomationActions,
+} from "./cloud-view.js";
 import { CloudLoopDialog } from "./loop-dialog.js";
 import {
   LoopReviewView,
@@ -153,57 +158,20 @@ const LAST_RUN_DOT = {
 const LOOP_PRIORITIES = [1, 2, 3, 4] as const;
 type LoopPriority = (typeof LOOP_PRIORITIES)[number];
 const DEFAULT_LOOP_PRIORITY: LoopPriority = 3;
-const LOOP_PRIORITY_STORAGE_KEY = "cloudroom-loops:priorities";
-
-function isLoopPriority(value: unknown): value is LoopPriority {
-  return LOOP_PRIORITIES.includes(value as LoopPriority);
-}
-
-function readLoopPriorities(): Record<string, LoopPriority> {
-  try {
-    const parsed: unknown = JSON.parse(
-      window.localStorage.getItem(LOOP_PRIORITY_STORAGE_KEY) ?? "{}",
-    );
-    if (parsed === null || typeof parsed !== "object") return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(([, value]) => isLoopPriority(value)),
-    ) as Record<string, LoopPriority>;
-  } catch {
-    return {};
-  }
-}
-
-function saveLoopPriority(
-  key: string,
-  priority: LoopPriority,
-): Record<string, LoopPriority> {
-  const next = { ...readLoopPriorities(), [key]: priority };
-  try {
-    window.localStorage.setItem(
-      LOOP_PRIORITY_STORAGE_KEY,
-      JSON.stringify(next),
-    );
-  } catch {
-    return next;
-  }
-  return next;
-}
-
-function useLoopPriorities() {
-  const [priorities, setPriorities] = useState(readLoopPriorities);
-  useEffect(() => {
-    const sync = (event: StorageEvent) => {
-      if (event.key === LOOP_PRIORITY_STORAGE_KEY) {
-        setPriorities(readLoopPriorities());
-      }
-    };
-    window.addEventListener("storage", sync);
-    return () => window.removeEventListener("storage", sync);
-  }, []);
-  const setPriority = useCallback((key: string, priority: LoopPriority) => {
-    setPriorities(saveLoopPriority(key, priority));
-  }, []);
-  return { priorities, setPriority };
+/** Priorities just picked, shown until the saved loops catch up; a failed save drops its pick. */
+function useChosenPriorities(local: unknown, cloud: unknown) {
+  const [chosen, setChosen] = useState<Record<string, LoopPriority>>({});
+  useEffect(() => setChosen({}), [local, cloud]);
+  const choose = useCallback(
+    (key: string, priority: LoopPriority, save: () => Promise<void>) => {
+      setChosen((current) => ({ ...current, [key]: priority }));
+      save().catch(() =>
+        setChosen(({ [key]: _dropped, ...rest }) => rest),
+      );
+    },
+    [],
+  );
+  return { chosen, choose };
 }
 
 function LoopPriorityMenu({
@@ -523,14 +491,31 @@ function AutomationRowMetadata({
   );
 }
 
-function FailedBadge({ error }: { error: string | null }) {
+function FailedBadge({
+  error,
+  waiting = false,
+}: {
+  error: string | null;
+  waiting?: boolean;
+}) {
   return (
     <span
       title={error ?? undefined}
-      className="inline-flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full bg-destructive/10 px-2 py-0.5 text-2xs font-medium text-destructive-text"
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full px-2 py-0.5 text-2xs font-medium",
+        waiting
+          ? "bg-muted text-muted-foreground"
+          : "bg-destructive/10 text-destructive-text",
+      )}
     >
-      <span className="size-1.5 rounded-full bg-destructive" aria-hidden />
-      Failed
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          waiting ? "bg-muted-foreground/50" : "bg-destructive",
+        )}
+        aria-hidden
+      />
+      {waiting ? "Waiting" : "Failed"}
     </span>
   );
 }
@@ -545,15 +530,65 @@ function NeedsYouBadge({ count }: { count: number }) {
   );
 }
 
-function LoopStat({
+type OrbitTick = "done" | "needs-you" | "failed" | null;
+
+const ORBIT_SIZE = 236;
+const ORBIT_TICKS = 40;
+const ORBIT_TICK_COLOR = {
+  done: "var(--primary)",
+  "needs-you": "var(--warning-text)",
+  failed: "var(--destructive-text)",
+};
+
+function cronFieldCount(spec: string, min: number, max: number): number {
+  let count = 0;
+  for (let value = min; value <= max; value++) {
+    const matches = spec.split(",").some((part) => {
+      const [range = "", stepText] = part.split("/");
+      const step = stepText === undefined ? 1 : Number(stepText);
+      const [from = NaN, to] =
+        range === "*" ? [min, max] : range.split("-").map(Number);
+      const end = to ?? (stepText === undefined ? from : max);
+      return value >= from && value <= end && (value - from) % step === 0;
+    });
+    if (matches) count++;
+  }
+  return count;
+}
+
+function cronRunsPerDay(cron: string | null): number {
+  const [minute, hour, day, , weekday] = cron?.trim().split(/\s+/) ?? [];
+  if (minute === undefined || hour === undefined || weekday === undefined) {
+    return 0;
+  }
+  return (
+    cronFieldCount(minute, 0, 59) *
+    cronFieldCount(hour, 0, 23) *
+    (day === "*" || day === undefined ? 1 : cronFieldCount(day, 1, 31) / 31) *
+    (weekday === "*" ? 1 : cronFieldCount(weekday, 0, 6) / 7)
+  );
+}
+
+function orbitArc(radius: number, from: number, to: number) {
+  const center = ORBIT_SIZE / 2;
+  const point = (degrees: number) => {
+    const radians = ((degrees - 90) * Math.PI) / 180;
+    return `${(center + radius * Math.cos(radians)).toFixed(1)} ${(center + radius * Math.sin(radians)).toFixed(1)}`;
+  };
+  return `M${point(from)}A${radius} ${radius} 0 0 1 ${point(to)}`;
+}
+
+function OrbitStat({
   label,
   value,
-  className,
+  hint,
+  bar,
   onClick,
 }: {
   label: string;
   value: ReactNode;
-  className?: string;
+  hint: ReactNode;
+  bar: ReactNode;
   onClick?: () => void;
 }) {
   return (
@@ -561,18 +596,190 @@ function LoopStat({
       type="button"
       disabled={onClick === undefined}
       onClick={onClick}
-      className="rounded-xl border border-border bg-surface-raised px-4 py-3 text-left transition-colors enabled:cursor-pointer enabled:hover:border-foreground/20"
+      className="min-w-0 rounded-lg text-left enabled:cursor-pointer enabled:hover:opacity-80"
     >
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div
-        className={cn(
-          "mt-1 text-2xl font-semibold tabular-nums text-foreground",
-          className,
-        )}
-      >
+      <div className="truncate text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-2 font-mono text-[26px] font-semibold tabular-nums leading-tight">
         {value}
       </div>
+      <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-foreground/10">
+        {bar}
+      </div>
+      <div className="mt-2 truncate text-xs text-muted-foreground">{hint}</div>
     </button>
+  );
+}
+
+function LoopOrbit({
+  rings,
+  running,
+  cloud,
+  runsPerDay,
+  totalRuns,
+  ownPercent,
+  needsYou,
+  failedToday,
+  next,
+  now,
+  onReview,
+}: {
+  rings: OrbitTick[][];
+  running: number;
+  cloud: number;
+  runsPerDay: number;
+  totalRuns: number;
+  ownPercent: number | null;
+  needsYou: number;
+  failedToday: number;
+  next: { name: string; at: number } | null;
+  now: number;
+  onReview?: () => void;
+}) {
+  const center = ORBIT_SIZE / 2;
+  const span = 360 / ORBIT_TICKS;
+  return (
+    <section
+      aria-label="Loops at a glance"
+      className="relative flex items-center gap-10 overflow-hidden rounded-2xl border border-foreground/10 bg-linear-to-b from-foreground/[0.035] to-foreground/[0.012] px-8 pt-7 pb-11 max-md:flex-col max-md:items-stretch"
+    >
+      <div className="relative mx-auto size-[236px] shrink-0">
+        <svg
+          viewBox={`0 0 ${ORBIT_SIZE} ${ORBIT_SIZE}`}
+          className="size-full overflow-visible"
+          aria-hidden
+        >
+          <defs>
+            <radialGradient id="loop-orbit-glow">
+              <stop offset="0" stopColor="var(--primary)" stopOpacity="0.16" />
+              <stop offset="1" stopColor="var(--primary)" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          <circle
+            cx={center}
+            cy={center}
+            r={center}
+            fill="url(#loop-orbit-glow)"
+          />
+          {rings.map((ticks, ring) =>
+            ticks.map((tick, index) => (
+              <path
+                key={`${ring}-${index}`}
+                d={orbitArc(
+                  center - 12 - ring * 13,
+                  index * span + 1.5,
+                  (index + 1) * span - 1.5,
+                )}
+                fill="none"
+                strokeWidth={6}
+                stroke={
+                  tick === null ? "var(--foreground)" : ORBIT_TICK_COLOR[tick]
+                }
+                strokeOpacity={
+                  tick === null ? 0.08 : 0.3 + (0.7 * index) / (ORBIT_TICKS - 1)
+                }
+              />
+            )),
+          )}
+          <circle
+            cx={center}
+            cy={2}
+            r={4}
+            fill="var(--primary)"
+            style={{ filter: "drop-shadow(0 0 6px var(--primary))" }}
+          />
+        </svg>
+        <div className="absolute inset-0 grid place-items-center text-center">
+          <div>
+            <div className="font-mono text-[27px] font-semibold tabular-nums">
+              {Math.round(runsPerDay).toLocaleString("en-US")}
+            </div>
+            <div className="mt-0.5 text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
+              Runs a day
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-primary-text">
+          <span className="size-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--primary)]" />
+          LIVE
+        </div>
+        <div className="mt-3.5 text-[40px] font-semibold leading-none tracking-[-0.035em]">
+          {running} {running === 1 ? "loop" : "loops"} running
+        </div>
+        <div className="mt-2.5 text-sm text-muted-foreground">
+          {cloud} in Cloud · {running - cloud} on this Mac · every ring is a
+          loop, every tick a run
+        </div>
+        <div className="mt-7 grid grid-cols-3 gap-6">
+          <OrbitStat
+            label="Runs so far"
+            value={totalRuns.toLocaleString("en-US")}
+            hint="All time, all loops"
+            bar={
+              <div className="h-full bg-linear-to-r from-transparent to-primary" />
+            }
+          />
+          <OrbitStat
+            label="On their own"
+            value={ownPercent === null ? "—" : `${ownPercent}%`}
+            hint="No human needed"
+            bar={
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{ width: `${ownPercent ?? 0}%` }}
+              />
+            }
+          />
+          <OrbitStat
+            label="Need you"
+            value={<span className="text-warning-text">{needsYou}</span>}
+            hint={
+              <span
+                className={
+                  failedToday > 0 ? "text-destructive-text" : undefined
+                }
+              >
+                {failedToday} failed today
+              </span>
+            }
+            bar={
+              <div
+                className="h-full rounded-full bg-warning-text"
+                style={{
+                  width: `${ownPercent === null ? 0 : 100 - ownPercent}%`,
+                }}
+              />
+            }
+            onClick={onReview}
+          />
+        </div>
+        {next ? (
+          <div className="mt-6 truncate border-t border-foreground/10 pt-4 text-sm text-muted-foreground">
+            Next up:{" "}
+            <span className="font-medium text-foreground">
+              {next.name} {formatTimeUntil(next.at, now)}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      <div className="absolute bottom-4 left-8 flex gap-3.5 text-[11px] text-muted-foreground">
+        {(
+          [
+            ["On its own", "bg-primary"],
+            ["Needed you", "bg-warning-text"],
+            ["Failed", "bg-destructive-text"],
+          ] as const
+        ).map(([label, color]) => (
+          <span key={label} className="flex items-center gap-1.5">
+            <span className={cn("h-[3px] w-2 rounded-full", color)} />
+            {label}
+          </span>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -599,6 +806,42 @@ function LoopLocation({ cloud }: { cloud: boolean }) {
   );
 }
 
+function LoopRepo({
+  project,
+  github,
+}: {
+  project: OverviewEntry["project"];
+  github: string | null;
+}) {
+  const label = automationProjectLabel(project);
+  const [owner, repo] = github?.split("/") ?? [];
+  return (
+    <span className="mt-1.5 flex min-w-0">
+      <span className="inline-flex min-w-0 max-w-full items-center rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
+        <AutomationMetadataItem
+          icon={github ? "GithubLogo" : "Folder"}
+          iconLabel={
+            github
+              ? "GitHub repo"
+              : project.id === PERSONAL_PROJECT_ID
+                ? `Project: ${label}`
+                : "Project"
+          }
+          title={github ?? label}
+        >
+          {github ? (
+            <>
+              {owner}/<span className="text-foreground/90">{repo}</span>
+            </>
+          ) : (
+            <span className="text-foreground/90">{label}</span>
+          )}
+        </AutomationMetadataItem>
+      </span>
+    </span>
+  );
+}
+
 function AutomationListRow({
   cloud,
   leading,
@@ -616,6 +859,7 @@ function AutomationListRow({
   actions,
   openLabel,
   onOpen,
+  repo,
 }: {
   cloud: boolean;
   leading?: ReactNode;
@@ -633,6 +877,7 @@ function AutomationListRow({
   actions?: ReactNode;
   openLabel?: string;
   onOpen: () => void;
+  repo?: ReactNode;
 }) {
   return (
     <ResourceRow
@@ -640,12 +885,15 @@ function AutomationListRow({
       title={name}
       state={
         <>
-          {status === "failed" ? <FailedBadge error={lastError} /> : null}
+          {status === "failed" || (status === "skipped" && lastError) ? (
+            <FailedBadge error={lastError} waiting={status === "skipped"} />
+          ) : null}
           <NeedsYouBadge count={needsYou} />
         </>
       }
       description={
         <>
+          {repo}
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-muted-foreground/80">
             <LoopLocation cloud={cloud} />
             {agentLine}
@@ -692,7 +940,7 @@ export function OverviewRow({
   project,
   scriptAgents,
   providers,
-  showProject,
+  github = null,
   now,
   needsYou = 0,
   leading,
@@ -703,7 +951,7 @@ export function OverviewRow({
   project: OverviewEntry["project"];
   scriptAgents: readonly AutomationAgentSummary[] | undefined;
   providers: ProviderList;
-  showProject: boolean;
+  github?: string | null;
   now: number;
   needsYou?: number;
   leading?: ReactNode;
@@ -722,7 +970,6 @@ export function OverviewRow({
     lastRunStatus: automation.lastRunStatus,
   });
   const lifecycleLocked = !oneShotLifecycleAllowsToggle(oneShotLifecycle);
-  const projectLabel = automationProjectLabel(project);
 
   return (
     <AutomationListRow
@@ -731,31 +978,12 @@ export function OverviewRow({
       status={automation.lastRunStatus}
       lastError={automation.lastError}
       name={automation.name}
+      repo={<LoopRepo project={project} github={github} />}
       agentLine={
-        <>
-          <AutomationAgentLine
-            agents={automationAgents(automation, scriptAgents)}
-            providers={providers}
-          />
-          {showProject ? (
-            <>
-              <span aria-hidden className="text-muted-foreground/40">
-                ·
-              </span>
-              <AutomationMetadataItem
-                icon="Folder"
-                iconLabel={
-                  project.id === PERSONAL_PROJECT_ID
-                    ? `Project: ${projectLabel}`
-                    : "Project"
-                }
-                title={projectLabel}
-              >
-                {projectLabel}
-              </AutomationMetadataItem>
-            </>
-          ) : null}
-        </>
+        <AutomationAgentLine
+          agents={automationAgents(automation, scriptAgents)}
+          providers={providers}
+        />
       }
       needsYou={needsYou}
       schedule={formatAutomationTrigger(automation.trigger)}
@@ -790,6 +1018,7 @@ export function OverviewRow({
 
 export function CloudAutomationRow({
   automation,
+  project,
   providers,
   now,
   needsYou = 0,
@@ -797,6 +1026,7 @@ export function CloudAutomationRow({
   actions,
 }: {
   automation: CloudAutomation;
+  project?: TemplateProject;
   providers: ProviderList;
   now: number;
   needsYou?: number;
@@ -809,12 +1039,19 @@ export function CloudAutomationRow({
     <AutomationListRow
       cloud
       leading={leading}
+      repo={
+        project ? (
+          <LoopRepo project={project} github={project.github} />
+        ) : undefined
+      }
       status={
-        automation.last_error !== null
-          ? "failed"
-          : automation.last_run_at !== null
-            ? "succeeded"
-            : null
+        automation.last_error?.startsWith("Skipped: ")
+          ? "skipped"
+          : automation.last_error !== null
+            ? "failed"
+            : automation.last_run_at !== null
+              ? "succeeded"
+              : null
       }
       lastError={automation.last_error}
       name={automation.name}
@@ -1102,6 +1339,7 @@ export function AutomationOverviewView({
   onRetry,
   onOpenDetail,
   onEnabledChange,
+  onPriorityChange,
   onCreateViaChat,
   activeMode,
   onModeChange,
@@ -1121,6 +1359,11 @@ export function AutomationOverviewView({
     enabled: boolean,
     route: AutomationDetailRoute,
   ) => Promise<void>;
+  /** Saves a Local loop's priority; rejects when it couldn't. */
+  onPriorityChange: (
+    route: AutomationDetailRoute,
+    priority: LoopPriority,
+  ) => Promise<void>;
   onCreateViaChat: (prompt?: string) => void;
   activeMode: AutomationCollectionMode;
   onModeChange: (mode: AutomationCollectionMode) => void;
@@ -1132,6 +1375,7 @@ export function AutomationOverviewView({
   review?: LoopReviewState;
   templates?: LoopTemplatesState;
   localDialog?: {
+    projectId: string;
     automationId: string;
     render: (
       priority: LoopPriority,
@@ -1151,7 +1395,37 @@ export function AutomationOverviewView({
   const [sortMode, setSortMode] = useState<AutomationSortMode>("next");
   const [sortDirection, setSortDirection] =
     useState<AutomationSortDirection>("asc");
-  const { priorities, setPriority } = useLoopPriorities();
+  const { chosen, choose } = useChosenPriorities(entries, cloud?.rows);
+  const localPriority = (route: AutomationDetailRoute) => {
+    const automation = entries?.find(
+      (entry) => entry.automation.id === route.automationId,
+    )?.automation;
+    return (
+      chosen[`local:${route.automationId}`] ??
+      (automation && "priority" in automation
+        ? (automation.priority as LoopPriority)
+        : DEFAULT_LOOP_PRIORITY)
+    );
+  };
+  const setLocalPriority = (
+    route: AutomationDetailRoute,
+    priority: LoopPriority,
+  ) =>
+    choose(`local:${route.automationId}`, priority, () =>
+      onPriorityChange(route, priority),
+    );
+  const cloudPriority = (automation: CloudAutomation) =>
+    chosen[`cloud:${automation.id}`] ??
+    ((automation.priority ?? DEFAULT_LOOP_PRIORITY) as LoopPriority);
+  const setCloudPriority = (
+    automation: CloudAutomation,
+    priority: LoopPriority,
+  ) =>
+    choose(`cloud:${automation.id}`, priority, () =>
+      cloud
+        ? cloud.actions.onPriorityChange(automation, priority)
+        : Promise.resolve(),
+    );
   const [openCloudId, setOpenCloudId] = useState<string | null>(null);
   const { providers } = useProviders();
   const now = useMinuteClock();
@@ -1278,11 +1552,7 @@ export function AutomationOverviewView({
   let body: ReactNode;
   if (error !== null) {
     body = (
-      <ResourceListState
-        state="error"
-        message="Couldn't load loops."
-        onRetry={onRetry}
-      />
+      <ResourceListState state="error" message={error} onRetry={onRetry} />
     );
   } else if (entries === null) {
     body = (
@@ -1312,15 +1582,8 @@ export function AutomationOverviewView({
       const key = item.loop.id ?? item.loop.name;
       needsYou.set(key, (needsYou.get(key) ?? 0) + 1);
     }
-    const priorityOf = (key: string) =>
-      priorities[key] ?? DEFAULT_LOOP_PRIORITY;
-    const priorityMenu = (key: string, name: string) => (
-      <LoopPriorityMenu
-        priority={priorityOf(key)}
-        name={name}
-        onChange={(priority) => setPriority(key, priority)}
-      />
-    );
+    const projectOf = (id: string | null | undefined) =>
+      templates?.projects?.find((project) => project.id === id);
     const renderEntry = ({
       automation,
       project,
@@ -1340,10 +1603,24 @@ export function AutomationOverviewView({
           project={project}
           scriptAgents={scriptAgents}
           providers={providers}
-          showProject={projectBucketCount > 1}
+          github={projectOf(project.id)?.github}
           now={now}
           needsYou={needsYou.get(automation.id) ?? 0}
-          leading={priorityMenu(`local:${automation.id}`, automation.name)}
+          leading={
+            <LoopPriorityMenu
+              priority={localPriority({
+                projectId: automation.projectId,
+                automationId: automation.id,
+              })}
+              name={automation.name}
+              onChange={(priority) =>
+                setLocalPriority(
+                  { projectId: automation.projectId, automationId: automation.id },
+                  priority,
+                )
+              }
+            />
+          }
           onNavigate={onOpenDetail}
           onEnabledChange={onEnabledChange}
         />
@@ -1356,22 +1633,32 @@ export function AutomationOverviewView({
         "problem" in entry.automation
           ? 0
           : automationLifecycleSortRank(entry.automation),
-      priority: priorityOf(`local:${entry.automation.id}`),
+      priority: localPriority({
+        projectId: entry.project.id,
+        automationId: entry.automation.id,
+      }),
       node: renderEntry(entry),
     });
     const cloudItem = (automation: CloudAutomation): ListItem => ({
       name: automation.name,
       nextRunAt: cloudNextRunAt(automation),
       rank: cloudLifecycleSortRank(automation),
-      priority: priorityOf(`cloud:${automation.id}`),
+      priority: cloudPriority(automation),
       node: cloud ? (
         <CloudAutomationRow
           key={automation.id}
           automation={automation}
+          project={projectOf(automation.project_id)}
           providers={providers}
           now={now}
           needsYou={needsYou.get(automation.name) ?? 0}
-          leading={priorityMenu(`cloud:${automation.id}`, automation.name)}
+          leading={
+            <LoopPriorityMenu
+              priority={cloudPriority(automation)}
+              name={automation.name}
+              onChange={(priority) => setCloudPriority(automation, priority)}
+            />
+          }
           actions={{
             ...cloud.actions,
             onOpen: (a) => setOpenCloudId(a.id),
@@ -1418,30 +1705,74 @@ export function AutomationOverviewView({
       (sum, count) => sum + count,
       0,
     );
+    const finished = (review?.data?.items ?? [])
+      .filter((item) => item.status !== "running")
+      .sort((a, b) => a.at - b.at);
+    const history = new Map<string, OrbitTick[]>();
+    for (const item of finished) {
+      const key = item.loop.id ?? item.loop.name;
+      history.set(key, [...(history.get(key) ?? []), item.status as OrbitTick]);
+    }
+    const activeLocal = activeEntries.flatMap((entry) =>
+      "problem" in entry.automation ? [] : [entry.automation],
+    );
+    const activeCloud = visibleCloud.filter((automation) => automation.enabled);
+    const orbitLoops = [
+      ...activeLocal.map((automation) => ({
+        key: automation.id,
+        perDay: cronRunsPerDay(
+          automation.trigger.triggerType === "schedule"
+            ? automation.trigger.cron
+            : null,
+        ),
+      })),
+      ...activeCloud.map((automation) => ({
+        key: automation.name,
+        perDay: cronRunsPerDay(automation.cron),
+      })),
+    ];
+    const rings = orbitLoops
+      .map((loop) => history.get(loop.key)?.slice(-ORBIT_TICKS) ?? [])
+      .sort((a, b) => b.length - a.length)
+      .slice(0, 5)
+      .map((ticks) => [
+        ...Array<OrbitTick>(ORBIT_TICKS - ticks.length).fill(null),
+        ...ticks,
+      ]);
+    const nextItem = activeItems.find((item) => item.nextRunAt === nextRunAt);
     body = (
       <div className="pb-6">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <LoopStat label="Active loops" value={activeItems.length} />
-          <LoopStat
-            label="Next run"
-            value={
-              Number.isFinite(nextRunAt) ? formatTimeUntil(nextRunAt, now) : "—"
-            }
-            className="font-mono"
-          />
-          <LoopStat
-            label="Needs you"
-            value={needsYouTotal}
-            className={needsYouTotal > 0 ? "text-warning-text" : undefined}
-            onClick={review ? () => onModeChange("review") : undefined}
-          />
-          <LoopStat
-            label="Failed today"
-            value={failedToday}
-            className={failedToday > 0 ? "text-destructive-text" : undefined}
-            onClick={review ? () => onModeChange("review") : undefined}
-          />
-        </div>
+        <LoopOrbit
+          rings={rings}
+          running={activeItems.length}
+          cloud={activeCloud.length}
+          runsPerDay={orbitLoops.reduce((sum, loop) => sum + loop.perDay, 0)}
+          totalRuns={
+            (entries ?? []).reduce(
+              (sum, { automation }) =>
+                sum + ("problem" in automation ? 0 : automation.runCount),
+              0,
+            ) + cloudRows.reduce((sum, automation) => sum + automation.runs, 0)
+          }
+          ownPercent={
+            finished.length === 0
+              ? null
+              : Math.round(
+                  (100 *
+                    finished.filter((item) => item.status === "done").length) /
+                    finished.length,
+                )
+          }
+          needsYou={needsYouTotal}
+          failedToday={failedToday}
+          next={
+            nextItem && Number.isFinite(nextRunAt)
+              ? { name: nextItem.name, at: nextRunAt }
+              : null
+          }
+          now={now}
+          onReview={review ? () => onModeChange("review") : undefined}
+        />
         {problems.length > 0 ? (
           <div className="mt-6 divide-y divide-foreground/10">
             {problems.map(renderEntry)}
@@ -1602,6 +1933,7 @@ export function AutomationOverviewView({
               }
             />
           ) : null}
+          {cloud ? <LoopLimitSwitch /> : null}
           <NewLoopMenu onCreateViaChat={onCreateViaChat} />
         </>
       }
@@ -1624,14 +1956,7 @@ export function AutomationOverviewView({
           <LoopTemplatesView
             entries={entries}
             cloudRows={cloudRows}
-            templates={{
-              ...templates,
-              onAdd: async (template, projectIds, target) => {
-                const keys = await templates.onAdd(template, projectIds, target);
-                for (const key of keys) setPriority(key, template.priority);
-                return keys;
-              },
-            }}
+            templates={templates}
             renderAgent={(agent) => (
               <AutomationAgentLine
                 agents={[agent]}
@@ -1649,22 +1974,15 @@ export function AutomationOverviewView({
       {openCloud && cloud ? (
         <CloudLoopDialog
           automation={openCloud}
-          priority={
-            priorities[`cloud:${openCloud.id}`] ?? DEFAULT_LOOP_PRIORITY
-          }
-          onPriorityChange={(priority) =>
-            setPriority(`cloud:${openCloud.id}`, priority)
-          }
+          priority={cloudPriority(openCloud)}
+          onPriorityChange={(priority) => setCloudPriority(openCloud, priority)}
           actions={cloud.actions}
           onClose={() => setOpenCloudId(null)}
         />
       ) : null}
       {localDialog
-        ? localDialog.render(
-            priorities[`local:${localDialog.automationId}`] ??
-              DEFAULT_LOOP_PRIORITY,
-            (priority) =>
-              setPriority(`local:${localDialog.automationId}`, priority),
+        ? localDialog.render(localPriority(localDialog), (priority) =>
+            setLocalPriority(localDialog, priority),
           )
         : null}
     </ResourceCollectionPage>

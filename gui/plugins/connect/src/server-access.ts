@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 
@@ -58,7 +59,7 @@ export async function registerServerAccess(bb: BbPluginApi, relay: RelayAccess) 
   bb.experimental_serverAccess.register({
     id: "connect",
     displayName: "Cloudroom Connect",
-    description: "Use this Mac's private cloudroom.run address.",
+    description: `Use this ${COMPUTER}'s private cloudroom.run address.`,
     availability: () => {
       const status = relay.status();
       return status.paired
@@ -68,7 +69,7 @@ export async function registerServerAccess(bb: BbPluginApi, relay: RelayAccess) 
           }
         : {
             status: "setup-required",
-            message: "Sign in to Cloudroom so other machines can reach this Mac",
+            message: `Sign in to Cloudroom so other machines can reach this ${COMPUTER}`,
           };
     },
     acquire({ hostId, signal }) {

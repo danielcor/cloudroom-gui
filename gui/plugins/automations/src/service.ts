@@ -14,6 +14,7 @@ import {
   listAllAutomations,
   listAutomationRuns,
   listAutomationsForProject,
+  listRunningAutomationRunsByThread,
   linkRunThread,
   setAutomationEnabled,
   setReviewed,
@@ -75,7 +76,8 @@ type ServiceApi = Pick<BbPluginApi, "realtime" | "log"> & {
     projects: Pick<BbPluginApi["sdk"]["projects"], "get" | "list"> &
       Partial<Pick<BbPluginApi["sdk"]["projects"], "defaultExecutionOptions">>;
     providers: Pick<BbPluginApi["sdk"]["providers"], "list">;
-    threads: Pick<BbPluginApi["sdk"]["threads"], "get" | "send" | "spawn">;
+    threads: Pick<BbPluginApi["sdk"]["threads"], "get" | "send" | "spawn"> &
+      Partial<Pick<BbPluginApi["sdk"]["threads"], "output">>;
     // Webhook loops' URLs live on the website (ADR 0262).
     cloudroom?: Pick<BbPluginApi["sdk"]["cloudroom"], "automations">;
   };
@@ -116,6 +118,16 @@ export interface AutomationService {
   review(): Promise<ReviewResponse>;
   markReviewed(input: { itemIds: string[]; reviewed: boolean }): { ok: true };
   linkThread(input: { runId: string; threadId: string }): { linked: boolean };
+  /** `room-cli loop report` in a Local loop run: saved with Cloud runs on the website (ADR 0298). */
+  report(input: LoopReport): Promise<{ reported: true }>;
+}
+
+export interface LoopReport {
+  threadId: string;
+  outcome: string;
+  confidence: string;
+  reason: string;
+  actions: string[];
 }
 
 function requireProjectAutomation(
@@ -685,6 +697,7 @@ export function createAutomationService(args: {
           execution: stored.execution,
           origin: payload.origin,
           createdByThreadId: payload.createdByThreadId ?? null,
+          ...(payload.priority !== undefined ? { priority: payload.priority } : {}),
           nextRunAt: computeInitialNextRunAt({
             trigger: payload.trigger,
             enabled,
@@ -746,6 +759,7 @@ export function createAutomationService(args: {
       let stagedScriptFile: string | undefined;
       const patch: Parameters<typeof updateAutomation>[1]["patch"] = {};
       if (input.name !== undefined) patch.name = input.name;
+      if (input.priority !== undefined) patch.priority = input.priority;
       if (input.trigger !== undefined) {
         if (
           (input.trigger.triggerType === "webhook") !==
@@ -1020,6 +1034,26 @@ export function createAutomationService(args: {
         "automation-runs-changed",
       );
       return { ok: true };
+    },
+
+    async report(input) {
+      const run = listRunningAutomationRunsByThread(db, input.threadId)[0];
+      const automation = run ? getAutomation(db, run.automationId) : null;
+      if (!run || !automation) throw new Error("This thread is not a running loop run, so there is nothing to report.");
+      if (!bb.sdk.cloudroom) throw new Error("Sign in to Cloudroom to save loop reports.");
+      await bb.sdk.cloudroom.automations({
+        action: "report",
+        local: automation.id,
+        run: run.id,
+        thread: input.threadId,
+        name: automation.name,
+        started_at: new Date(run.startedAt).toISOString(),
+        outcome: input.outcome,
+        confidence: input.confidence,
+        reason: input.reason,
+        actions: input.actions,
+      });
+      return { reported: true };
     },
 
     linkThread(input) {

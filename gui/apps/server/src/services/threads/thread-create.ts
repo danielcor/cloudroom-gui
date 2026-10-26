@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { cloudExecution, cloudroom, isCloudThread } from "../cloudroom/commands.js";
 import { prepareLocalFork, prepareLocalForkCode } from "../cloudroom/teleport-local.js";
 import { FORK_HARNESSES, forkModel, forkTurn } from "../cloudroom/fork.js";
@@ -582,7 +583,7 @@ export async function createThreadFromRequest(
     requireLiveSourceThread(deps, { projectId: rawRequestInput.projectId, sourceThreadId: source.id });
     assertValidParentThread(deps, { parentThreadId: source.id, cloudChild: true });
     if (!deps.providerRegistry.supportsFork(source.providerId)) {
-      throw new ApiError(400, "invalid_request", `Provider ${source.providerId} does not support thread forks on this Mac`);
+      throw new ApiError(400, "invalid_request", `Provider ${source.providerId} does not support thread forks on this ${COMPUTER}`);
     }
     const prepared = await prepareLocalFork(deps as AppDeps, source, { environment: rawRequestInput.environment, ...(rawRequestInput.sourceSeqEnd === undefined ? {} : { sourceSeqEnd: rawRequestInput.sourceSeqEnd }) });
     return createThreadFromRequest(deps, {

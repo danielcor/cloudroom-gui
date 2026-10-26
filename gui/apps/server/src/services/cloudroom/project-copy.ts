@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -60,7 +61,7 @@ export async function localProjectNote(deps: Deps, projectId: string): Promise<s
   const project = getProject(deps.db, projectId);
   const path = project ? localProjectPath(deps, project.id) : undefined;
   if (!project || !path || githubRepository(await projectRemote(deps, project, path)) || await smallProject(path)) return undefined;
-  return `This project is not on GitHub and too large to copy, so only its \`.env\` files are here. The rest is on the user's Mac at \`${path}\`. Pull only what the task needs with \`room-cli mac pull\`.`;
+  return `This project is not on GitHub and too large to copy, so only its \`.env\` files are here. The rest is on the user's ${COMPUTER} at \`${path}\`. Pull only what the task needs with \`room-cli mac pull\`.`;
 }
 
 export function planProjectCopy(...args: Parameters<typeof planProjectCopyOrThrow>): Promise<ProjectCopyJob | null> {
@@ -173,7 +174,7 @@ async function writeFailureNote(client: CloudroomClient, job: ProjectCopyJob, me
   const target = (await client.workspace(job.workspace))?.path;
   if (!target) return;
   const next = job.localPath
-    ? `The full project is on the user's Mac at \`${job.localPath}\`. Pull only what the task needs with \`room-cli mac pull\`.`
+    ? `The full project is on the user's ${COMPUTER} at \`${job.localPath}\`. Pull only what the task needs with \`room-cli mac pull\`.`
     : "Tell the user, since the files are not available anywhere else.";
   const note = `Cloudroom could not copy this project into the cloud, so do not wait for more files.\n\n${message}\n\n${next}\n`;
   await vm(client, `mkdir -p -- ${quote(`${target}/.cloudroom`)} && cat > ${quote(`${target}/${FAILURE_NOTE}`)}`, Buffer.from(note));
@@ -302,7 +303,7 @@ async function packProject(root: string, scope: "all" | "changed" | "env", archi
     const files = await localFiles(root, "env").catch(() => { throw error; });
     if (files.length) await pack(root, files, archive).catch(() => { throw error; });
     const reason = error instanceof Error ? error.message : String(error);
-    return { files: files.length, partial: `Only the \`.env\` files were copied, because the Mac could not pack the rest: ${reason}`.slice(0, 500) };
+    return { files: files.length, partial: `Only the \`.env\` files were copied, because the ${COMPUTER} could not pack the rest: ${reason}`.slice(0, 500) };
   }
 }
 

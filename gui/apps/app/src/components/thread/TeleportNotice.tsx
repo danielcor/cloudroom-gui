@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer } from "react";
-import type { TeleportLocalStep, Thread } from "@cloudroom/domain";
+import { COMPUTER_TITLE, type TeleportLocalStep, type Thread } from "@cloudroom/domain";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import {
@@ -23,7 +23,7 @@ const LOCAL_STEPS: [TeleportLocalStep, string][] = [
   ["stopping", "Stop cloud agent"],
   ["downloading", "Download chat"],
   ["copying", "Copy code"],
-  ["switching", "Switch to Mac"],
+  ["switching", `Switch to ${COMPUTER_TITLE}`],
 ];
 
 export function TeleportLocalNotice({ step = "stopping" }: { step?: TeleportLocalStep }) {

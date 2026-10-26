@@ -21,6 +21,7 @@
     "prepare:bundled": "bb-plugin-build prepare-bundled"
   },
   "dependencies": {
+    "@cloudroom/domain": "workspace:*",
     "@cloudroom/process-utils": "workspace:*",
     "@cloudroom/shared-ui": "workspace:*",
     "zod": "^4.3.6"

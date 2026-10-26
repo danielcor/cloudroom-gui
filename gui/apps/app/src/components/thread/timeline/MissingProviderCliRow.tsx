@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@cloudroom/shared-ui/button";
@@ -82,8 +83,8 @@ export function MissingProviderCliRow({
         {status?.installed
           ? `${name} CLI is installed`
           : installing
-            ? `Installing ${name} CLI on this Mac…`
-            : `${name} CLI isn't installed on this Mac`}
+            ? `Installing ${name} CLI on this ${COMPUTER}…`
+            : `${name} CLI isn't installed on this ${COMPUTER}`}
       </p>
       <div className="flex flex-wrap items-center gap-2 pl-7">
         {hostId &&

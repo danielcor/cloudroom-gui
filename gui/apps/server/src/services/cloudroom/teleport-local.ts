@@ -19,7 +19,7 @@ import {
   threadPluginMetadata,
   threads,
 } from "@cloudroom/db";
-import { PERSONAL_PROJECT_ID, type PromptInput, type TeleportLocalStep, type Thread } from "@cloudroom/domain";
+import { PERSONAL_PROJECT_ID, type PromptInput, type TeleportLocalStep, type Thread, COMPUTER } from "@cloudroom/domain";
 import type { CreateThreadEnvironmentArgs } from "@cloudroom/server-contract";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
@@ -141,7 +141,7 @@ function requireThisMac(deps: AppDeps, requested: CreateThreadEnvironmentArgs): 
     : requested.type === "host" ? requested.hostId
     : requested.type === "provider" ? requested.machine && (requested.machine.type === "existing" ? requested.machine.hostId : "new") : undefined;
   if (target !== undefined && target !== resolvePrimaryHostId(deps))
-    throw new ApiError(409, "fork_unavailable", "A Cloud thread forks to Local only on this Mac. Pick a folder or worktree on this Mac.");
+    throw new ApiError(409, "fork_unavailable", `A Cloud thread forks to Local only on this ${COMPUTER}. Pick a folder or worktree on this ${COMPUTER}.`);
 }
 
 export async function prepareLocalFork(deps: AppDeps, source: Thread, request: { sourceSeqEnd?: number; environment: CreateThreadEnvironmentArgs }): Promise<{ fork: ThreadForkPoint; environment: CreateThreadEnvironmentArgs; note: PromptInput }> {
@@ -149,7 +149,7 @@ export async function prepareLocalFork(deps: AppDeps, source: Thread, request: {
   const saved = binding(deps.db, source.id);
   const harness = source.providerId as Harness;
   if (!saved?.sessionId || !saved.nativeId || !/^[A-Za-z0-9_-]+$/.test(saved.nativeId) || !FORK_HARNESSES.includes(harness))
-    throw new ApiError(409, "fork_source_unavailable", "Only a started Claude Code or Codex Cloud thread can be forked to this Mac.");
+    throw new ApiError(409, "fork_source_unavailable", `Only a started Claude Code or Codex Cloud thread can be forked to this ${COMPUTER}.`);
   const point = cloudForkPoint(deps.db, source, request.sourceSeqEnd);
   const client = await cloudroom(deps).threadClient(source.id);
   const vmPath = (await vm(client, findNative(harness, saved.nativeId))).toString().trim();
@@ -181,7 +181,7 @@ export async function prepareLocalForkCode(deps: AppDeps, source: Thread, folder
   const code = await landLocalForkCode(deps, client, source, cloud.path, folder ?? await localForkFolder(deps, source), requested);
   return {
     environment: code.environment,
-    note: { type: "text", text: `[Local fork]\nThis conversation was forked from a Cloud thread and now runs on the user's Mac. ${code.note}`, mentions: [], visibility: "agent-only" },
+    note: { type: "text", text: `[Local fork]\nThis conversation was forked from a Cloud thread and now runs on the user's ${COMPUTER}. ${code.note}`, mentions: [], visibility: "agent-only" },
   };
 }
 
@@ -191,7 +191,7 @@ async function localForkFolder(deps: AppDeps, source: Thread): Promise<string> {
   if (hostId && project) await ensureProjectCheckoutForThread(deps, { project, hostId });
   return (await localEnvironment(deps, source).catch((error: unknown) => {
     throw error instanceof ApiError && error.body.code === "teleport_unavailable"
-      ? new ApiError(409, "fork_unavailable", "This project has no folder on this Mac and no GitHub repo to clone. Add its folder here, or fork to Cloud.")
+      ? new ApiError(409, "fork_unavailable", `This project has no folder on this ${COMPUTER} and no GitHub repo to clone. Add its folder here, or fork to Cloud.`)
       : error;
   })).path;
 }
@@ -229,7 +229,7 @@ async function landLocalForkCode(deps: AppDeps, client: CloudroomClient, source:
     await fetch().catch(async () => { await exec("git", ["-C", folder, "fetch", "-q", "origin"]).catch(() => {}); await fetch(); });
   } catch (error) {
     const reason = error instanceof Error && "stderr" in error ? String(error.stderr).trim() : "";
-    throw new ApiError(409, "fork_code_unavailable", `The Cloud thread's code could not be copied to this Mac: ${reason || "git fetch failed"}`);
+    throw new ApiError(409, "fork_code_unavailable", `The Cloud thread's code could not be copied to this ${COMPUTER}: ${reason || "git fetch failed"}`);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -245,10 +245,10 @@ export async function copyToMac(deps: AppDeps, threadId: string): Promise<{ bran
   const thread = getThread(deps.db, threadId);
   const saved = binding(deps.db, threadId);
   if (!thread || thread.executionTarget !== "cloud" || thread.parentThreadId || thread.deletedAt || !saved?.sessionId)
-    throw new ApiError(409, "copy_unavailable", "Copy to Mac needs a started cloud thread.");
+    throw new ApiError(409, "copy_unavailable", `Copy to ${COMPUTER} needs a started cloud thread.`);
   const environment = await localEnvironment(deps, thread);
   if (await git(environment.path, ["rev-parse", "--git-dir"]) === null)
-    throw new ApiError(409, "copy_unavailable", "This project's folder on this Mac is not a Git repository.");
+    throw new ApiError(409, "copy_unavailable", `This project's folder on this ${COMPUTER} is not a Git repository.`);
   const client = await cloudroom(deps).teleportClient(threadId);
   const cloud = await client.sessionWorkspace(saved.sessionId);
   const folder = await mkdtemp(join(tmpdir(), "cloudroom-copy-"));
@@ -275,7 +275,7 @@ export async function copyToMac(deps: AppDeps, threadId: string): Promise<{ bran
       catch (error) {
         const reason = error instanceof Error && "stderr" in error ? String(error.stderr).trim() : "";
         throw new ApiError(409, "copy_unavailable", /checked out|rejected|non-fast-forward/.test(reason)
-          ? `Your Mac's ${branch} is checked out or has other commits. Switch branches or rename it, then retry.`
+          ? `Your ${COMPUTER}'s ${branch} is checked out or has other commits. Switch branches or rename it, then retry.`
           : `The branch could not be copied: ${reason || "git fetch failed"}`);
       }
       return { branch };

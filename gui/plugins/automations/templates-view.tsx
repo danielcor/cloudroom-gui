@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { useMemo, useState, type ReactNode } from "react";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { Button } from "@cloudroom/shared-ui/button";
@@ -27,18 +28,19 @@ export interface TemplateProject {
   id: string;
   name: string;
   path: string | null;
+  github: string | null;
 }
 
 export type LoopTarget = "cloud" | "local";
 
 export interface LoopTemplatesState {
   projects: readonly TemplateProject[] | null;
-  /** Creates one loop per project, Cloud or Local. Resolves with the new loops' priority keys once every create has settled. */
+  /** Creates one loop per project, Cloud or Local, at the template's priority. Resolves once every create has settled. */
   onAdd: (
     template: LoopTemplate,
     projectIds: string[],
     target: LoopTarget,
-  ) => Promise<string[]>;
+  ) => Promise<void>;
   /** True on the Free plan, null while the plan loads. */
   locked: boolean | null;
   onUpgrade: () => void;
@@ -250,8 +252,8 @@ function TemplateRepoPicker({
                 disabled={pending}
                 title={
                   option === "cloud"
-                    ? "Runs on Cloudroom's servers, even while this Mac is off"
-                    : "Runs on this Mac, only while it is awake"
+                    ? `Runs on Cloudroom's servers, even while this ${COMPUTER} is off`
+                    : `Runs on this ${COMPUTER}, only while it is awake`
                 }
                 onClick={() => setTarget(option)}
                 className={cn(

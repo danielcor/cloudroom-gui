@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { useEffect, useState } from "react";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
@@ -37,7 +38,7 @@ export function TryCloudCard({ threadId, active, attached, onMove }: { threadId:
     <PromptStackCard ariaLabel="Move to Cloud" className={cn("mx-3 overflow-hidden rounded-xl border-muted-foreground/15 sm:mx-4", attached && "relative z-10 -mb-5 rounded-b-none border-b-0 pb-3")}>
       <div className="flex min-h-8 items-center gap-1.5 px-3 py-1.5 text-xs">
         <Icon name="Laptop" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="shrink-0 text-muted-foreground">Working {minutes}m on your Mac</span>
+        <span className="shrink-0 text-muted-foreground">Working {minutes}m on your {COMPUTER}</span>
         <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">·</span>
         <span className="min-w-0 flex-1 truncate text-foreground">Move it to Cloud so you can close your laptop</span>
         <button

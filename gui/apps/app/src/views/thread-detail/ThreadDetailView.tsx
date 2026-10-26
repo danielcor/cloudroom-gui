@@ -1,3 +1,4 @@
+import { BbHttpError } from "@/lib/sdk";
 import {
   useCallback,
   useEffect,
@@ -2547,10 +2548,23 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     return <RouteLoadingSkeleton isBoundedPane={isBoundedPane} />;
   }
   if (!thread) {
+    const body =
+      error instanceof BbHttpError
+        ? (error.body as {
+            message?: unknown;
+            error?: { code?: unknown };
+          } | null)
+        : null;
+    const needsComputer =
+      body?.error?.code === "needs_mac" ? body.message : null;
     return (
       <PageShell contentClassName="min-h-full items-center justify-center">
         <p className="py-12 text-center text-sm text-destructive">
-          {error ? "Failed to load thread." : "Not found"}
+          {typeof needsComputer === "string"
+            ? needsComputer
+            : error
+              ? "Failed to load thread."
+              : "Not found"}
         </p>
       </PageShell>
     );

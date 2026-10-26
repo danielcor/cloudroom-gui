@@ -1,3 +1,4 @@
+import { COMPUTER_TITLE } from "@cloudroom/domain/computer-name";
 import {
   useCallback,
   useEffect,
@@ -441,7 +442,7 @@ function AccountChip({
             className="flex items-center gap-2"
           >
             <span className="min-w-0 flex-1 truncate">
-              {accountName(account) ?? "This Mac"}
+              {accountName(account) ?? `This ${COMPUTER_TITLE}`}
             </span>
             <Icon
               name="Check"

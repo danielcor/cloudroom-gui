@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   experimental_ProviderModelPicker as ProviderModelPicker,
+  useRpc,
   type ExperimentalProviderModelPickerRouting,
   type ExperimentalProviderModelPickerValue,
 } from "@get-bb/plugin-sdk/app";
@@ -35,6 +36,8 @@ import {
   isCloudWebhook,
 } from "./lib/format-schedule.js";
 import { LOOP_PRIORITY_STYLE } from "./templates-view.js";
+import type { automationRpcContract } from "./src/rpc.js";
+import type { LoopUsage } from "./src/usage.js";
 
 const PRIORITIES = [1, 2, 3, 4] as const;
 export type Priority = (typeof PRIORITIES)[number];
@@ -50,6 +53,33 @@ const SCHEDULE_PRESETS = [
 
 function scheduleLabel(cron: string, timezone: string): string {
   return formatAutomationTrigger({ triggerType: "schedule", cron, timezone });
+}
+
+/** Each schedule's rough share of the weekly Claude or Codex limit (docs/scopes/loops.md), or null without enough data. */
+function useLoopUsage(
+  key: LoopDialogLoop["usageKey"],
+  crons: string[],
+): LoopUsage {
+  const rpc = useRpc<typeof automationRpcContract>();
+  const [usage, setUsage] = useState<LoopUsage>(null);
+  const request = key ? JSON.stringify({ ...key, crons }) : null;
+  useEffect(() => {
+    if (!request) return;
+    let live = true;
+    rpc.call("automations_usage", JSON.parse(request)).then(
+      (result) => live && setUsage(result),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [rpc, request]);
+  return usage;
+}
+
+function shareLabel(percent: number | undefined): string | null {
+  if (percent === undefined) return null;
+  return percent < 1 ? "<1%" : `~${Math.round(percent)}%`;
 }
 
 function cloudAgentValue(
@@ -85,6 +115,7 @@ export type LoopDialogLoop = {
   agentEditable: boolean;
   agentRouting?: ExperimentalProviderModelPickerRouting;
   runsOn: string;
+  usageKey?: { automationId: string } | { cloudId: string };
 };
 
 function sameAgent(
@@ -176,6 +207,7 @@ export function LoopDialog({
     loop.cron === null || SCHEDULE_PRESETS.includes(loop.cron)
       ? SCHEDULE_PRESETS
       : [loop.cron, ...SCHEDULE_PRESETS];
+  const usage = useLoopUsage(loop.usageKey, scheduleOptions);
   const changes: LoopDialogChanges = {};
   if (loop.prompt !== undefined && prompt.trim() !== loop.prompt.trim())
     changes.prompt = prompt.trim();
@@ -260,14 +292,30 @@ export function LoopDialog({
             ) : (
               <Select value={cron} onValueChange={setCron} disabled={pending}>
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue>{scheduleLabel(cron, loop.timezone)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {scheduleOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {scheduleLabel(option, loop.timezone)}
+                    <SelectItem
+                      key={option}
+                      value={option}
+                      className="[&>span:last-child]:flex-1"
+                    >
+                      <span className="flex items-center justify-between gap-6">
+                        {scheduleLabel(option, loop.timezone)}
+                        {usage && (
+                          <span className="tabular-nums text-muted-foreground/70">
+                            {shareLabel(usage.percents[option])}
+                          </span>
+                        )}
+                      </span>
                     </SelectItem>
                   ))}
+                  {usage && (
+                    <div className="mx-2 mt-1 border-t border-foreground/10 pb-1 pt-2 text-xs text-muted-foreground/70">
+                      Share of your weekly {usage.limit} limit
+                    </div>
+                  )}
                 </SelectContent>
               </Select>
             )}
@@ -395,6 +443,7 @@ export function CloudLoopDialog({
       runsOn: automation.new_thread
         ? "Cloud · new thread each run"
         : "Cloud · same thread",
+      usageKey: { cloudId: automation.id },
     }),
     [automation],
   );

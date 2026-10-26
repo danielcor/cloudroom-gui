@@ -5,7 +5,7 @@ where the user can add its prompt while reviewing the other settings. It can
 also be repaired directly:
 
 ```bash
-room-cli automation update <automationId> --project <id> --prompt "<prompt>"
+room-cli loop update <loopId> --project <id> --prompt "<prompt>"
 ```
 
 Writes remain strict. Run, pause, and resume reject damaged records; update
@@ -30,11 +30,11 @@ Updates edit the loop in place: settings you don't pass are kept.
 Change an agent loop's target:
 
 ```bash
-room-cli automation update <automationId> --project <id> \
+room-cli loop update <loopId> --project <id> \
   --environment <environment-id-or-path>
-room-cli automation update <automationId> --project <id> \
+room-cli loop update <loopId> --project <id> \
   --target-thread <thread-id>
-room-cli automation update <automationId> --project <id> \
+room-cli loop update <loopId> --project <id> \
   --new-environment worktree [--base-branch <branch>]
 ```
 

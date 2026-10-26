@@ -25,7 +25,7 @@ export interface CloudListeners {
 export interface CloudApi {
   threads(): Promise<CloudThreadSummary[]>;
   history(threadId: string, after: number): Promise<CloudHistory>;
-  send(threadId: string, text: string): Promise<void>;
+  send(threadId: string, text: string, requestId?: string): Promise<void>;
   stop(threadId: string): Promise<void>;
   listen(
     threadId: string,
@@ -35,6 +35,8 @@ export interface CloudApi {
 }
 
 export class SignedOutError extends Error {}
+
+const HISTORY_TIMEOUT_MS = 120_000;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/__cloud/${path}`, {
@@ -61,9 +63,15 @@ export const cloudApi: CloudApi = {
   threads: async () =>
     (await request<{ threads: CloudThreadSummary[] }>("threads")).threads,
   history: (threadId, after) =>
-    request<CloudHistory>(`threads/${threadId}?after=${after}`),
-  send: async (threadId, text) =>
-    void (await post(threadId, { action: "send", text })),
+    request<CloudHistory>(`threads/${threadId}?after=${after}`, {
+      signal: AbortSignal.timeout(HISTORY_TIMEOUT_MS),
+    }),
+  send: async (threadId, text, requestId) =>
+    void (await post(threadId, {
+      action: "send",
+      text,
+      request_id: requestId,
+    })),
   stop: async (threadId) => void (await post(threadId, { action: "stop" })),
   listen(threadId, after, listeners) {
     const source = new EventSource(

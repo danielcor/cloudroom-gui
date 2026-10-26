@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import Database from "better-sqlite3";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -30,7 +31,7 @@ export function importBbThreads(deps: AppDeps, hostId: string): Promise<BbImport
 }
 
 async function run(deps: AppDeps, hostId: string): Promise<BbImportResult> {
-  if (!existsSync(BB_DB)) throw new ApiError(404, "bb_not_installed", "BB is not installed on this Mac.");
+  if (!existsSync(BB_DB)) throw new ApiError(404, "bb_not_installed", `BB is not installed on this ${COMPUTER}.`);
   requireNonDestroyedHostWithStatus(deps, hostId);
   assertUsableHostId(deps, { hostId });
   await deps.providerRegistry.whenRegistrationsSettled();

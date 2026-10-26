@@ -1,4 +1,5 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
+import { COMPUTER } from "@cloudroom/domain";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -6,12 +7,14 @@ import { App } from "./App";
 import {
   isPhoneRelay,
   keepOfflineCopy,
+  macIsOff,
   macOffline,
   reloadWhenMacGoesOffline,
 } from "./cloud/cloud-mode";
 import { installCloudServer } from "./cloud/cloud-server";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { AppToaster } from "./components/AppToaster";
+import { appToast } from "./components/ui/app-toast";
 import { registerProviderCliInstallQueryClient } from "./components/provider-cli/provider-cli-install-store";
 import { initializeCorners } from "./hooks/useCorners";
 import { initializePreferredTheme } from "./hooks/useTheme";
@@ -36,6 +39,7 @@ Error.stackTraceLimit = 50;
 // longer exist. Reload to pick up the new build, at most once per minute so a
 // truly missing file can't cause a reload loop.
 window.addEventListener("vite:preloadError", () => {
+  if (macIsOff()) return;
   const lastReload = Number(sessionStorage.getItem("cloudroom:preload-reload"));
   if (Date.now() - lastReload < 60_000) return;
   sessionStorage.setItem("cloudroom:preload-reload", String(Date.now()));
@@ -60,6 +64,19 @@ const root = createRoot(document.getElementById("root")!, {
   },
 });
 
+let toldCloudMode = false;
+
+function CloudModeNotice() {
+  useEffect(() => {
+    if (toldCloudMode) return;
+    toldCloudMode = true;
+    appToast.message(
+      `Your ${COMPUTER} is offline. Showing your Cloud threads.`,
+    );
+  }, []);
+  return null;
+}
+
 function render() {
   root.render(
     <StrictMode>
@@ -68,6 +85,7 @@ function render() {
           <BrowserRouter>
             <App />
             <AppToaster />
+            {macIsOff() && <CloudModeNotice />}
           </BrowserRouter>
         </QueryClientProvider>
       </AppErrorBoundary>

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { COMPUTER } from "@cloudroom/domain/computer-name";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
@@ -79,7 +80,7 @@ describe("Keep Awake settings", () => {
       }),
     );
     expect(slot.getByText("Hosts")).toBeTruthy();
-    expect(slot.getByText("Choose which Macs to keep awake.")).toBeTruthy();
+    expect(slot.getByText(`Choose which ${COMPUTER}s to keep awake.`)).toBeTruthy();
 
     fireEvent.click(slot.getByRole("radio", { name: "Specific hosts" }));
     await waitFor(() =>

@@ -41,7 +41,7 @@ When you are done:
 - Otherwise leave the thread open. Explain each finding in plain English, in a few sentences, with the obvious, safe fix.`;
 const READ_ONLY = "Read only: do not edit, commit, or push anything.";
 const rotate = (title: string) =>
-  `First rename this thread: \`room-cli thread update --self --title "${title} · <area>"\`, where <area> is the part of the code you pick. Pick the area least recently covered: list this project's threads (\`room-cli thread list --project "$ROOM_PROJECT_ID" --json\`) and skip areas in recent "${title}" titles.`;
+  `First rename this thread: \`room-cli thread update --self --title "${title} · <area>"\`, where <area> is the part of the code you pick. Pick the area least recently covered: skip areas named in the past runs' Loop notes below.`;
 
 export const LOOP_TEMPLATES: readonly LoopTemplate[] = [
   {
@@ -114,7 +114,7 @@ Test it from outside like a careful attacker: auth and session handling, access 
     icon: "Bug",
     cron: "0 1 * * *",
     providerId: "pi",
-    model: "moonshotai/kimi-k3.1-pro",
+    model: "openrouter/moonshotai/kimi-k3.1-pro",
     reasoningLevel: "high",
     prompt: `Prove-it bug hunt: find one real security bug in this repo's own code, prove it, fix it, and open a PR.
 ${rotate("Prove-it bug hunt")}
@@ -135,16 +135,23 @@ When you are done:
     icon: "Zap",
     cron: "0 3 * * *",
     providerId: "pi",
-    model: "moonshotai/kimi-k3.1-pro",
+    model: "openrouter/moonshotai/kimi-k3.1-pro",
     reasoningLevel: "high",
     prompt: `Fuzz-and-fix: fuzz one input parser in this repo, and if it breaks, fix it and open a PR.
-${rotate("Fuzz-and-fix")}
-Pick code that reads outside input: request bodies, uploaded files, config, URLs, file paths, or CLI arguments. Work on a new branch. Never touch live systems or real user data, and add no new dependencies.
+First read the past runs' Loop notes below, and list open fix PRs (\`gh pr list --state open --search "Fuzz-and-fix in:title"\`).
+Pick one parser: code that reads outside input, like request bodies, uploaded files, config, URLs, file paths, or CLI arguments. Skip parsers with an open Fuzz-and-fix PR. Pick in this order:
+1. One changed in the last 7 days (\`git log --since="7 days ago" --name-only\`) that no run covered since the change.
+2. One no run has covered yet.
+3. One no run covered in the last 30 days.
+If none fits, write one line and archive this thread with \`room-cli thread archive --self\`. Otherwise rename this thread: \`room-cli thread update --self --title "Fuzz-and-fix · <parser>"\`.
+Work on a new branch. Never touch live systems or real user data, and add no new dependencies.
 Write the fuzz harness in \`/tmp/fuzz/\`, not in the repo, and install any fuzzing tool you need. Fuzz for up to 30 minutes. Look for crashes, panics, hangs, and paths that escape their folder.
 For each one: shrink the input, find the root cause, add a regression test to the existing tests, and make the smallest fix. Run that test and the nearby tests until they pass.
+Before the PR, start a reviewer on a different model that is set up (\`room-cli thread spawn --parent-self --provider <harness> --prompt "..."\`): it checks the crash is real and the fix breaks nothing, and ends with SHIP or HOLD. If HOLD, fix the reason once and ask again.
 When you are done:
-- Found and fixed: push the branch and open a PR with \`gh pr create\`: the input that broke it, the impact, the regression test, and the fix. Leave this thread open with the PR link.
-- Otherwise, write 1-2 lines on the target, how many inputs ran, and for how long. Then archive this thread with \`room-cli thread archive --self\`.`,
+- Fixed and SHIP: push the branch and open a PR titled "Fuzz-and-fix: <parser>: <bug>" with \`gh pr create\`: the input that broke it, the impact, the regression test, and the fix. Leave this thread open with the PR link.
+- Otherwise, write 1-2 lines on the target, how many inputs ran, and for how long. Then archive this thread with \`room-cli thread archive --self\`.
+Either way, your Loop note names the parser, how many inputs ran, and the result.`,
   },
   {
     id: "simplify-sweep",

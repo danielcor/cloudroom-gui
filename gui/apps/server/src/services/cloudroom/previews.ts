@@ -9,6 +9,8 @@ import { CLOUDROOM_PYTHON_PATH, CLOUDROOM_PREVIEW_SCRIPT_PATH } from "../../clou
 
 export const macAccessLevels = ["off", "read-only", "ask", "full"] as const;
 export type MacAccessLevel = typeof macAccessLevels[number];
+/** Read-only and Ask run commands in a macOS sandbox, so other systems offer only Off and Full. */
+export const supportedMacAccessLevels: readonly MacAccessLevel[] = process.platform === "darwin" ? macAccessLevels : ["off", "full"];
 
 type Deps = Pick<AppDeps, "config">;
 const folder = (deps: Deps) => join(deps.config.dataDir, "cloudroom-preview");
@@ -50,6 +52,7 @@ export async function macAccess(deps: Deps): Promise<MacAccessLevel | null> {
   }, () => null);
 }
 export async function setMacAccess(deps: Deps, level: MacAccessLevel): Promise<void> {
+  if (!supportedMacAccessLevels.includes(level)) throw new ApiError(400, "mac_access_unsupported", "Read and Ask need macOS. Pick Off or Full.");
   await writeFile(macAccessFile(deps), JSON.stringify({ level }), { mode: 0o600 });
   if (await readFile(join(folder(deps), "config.json")).then(() => true, () => false)) await setupPreviews(deps);
 }

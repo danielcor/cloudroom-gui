@@ -28,6 +28,7 @@ const rpcMethods = [
   "automations_get",
   "automations_create",
   "automations_update",
+  "automations_usage",
   "automations_delete",
   "automations_pause",
   "automations_resume",
@@ -189,7 +190,7 @@ describe("automations server plugin harness", () => {
     const { harness } = await bootAutomationsPlugin();
 
     expect([...harness.registrations.rpcMethods].sort()).toEqual(rpcMethods);
-    expect(harness.registrations.cli?.name).toBe("automation");
+    expect(harness.registrations.cli?.name).toBe("loop");
     expect(
       harness.registrations.services.map((service) => service.name),
     ).toEqual(["automation-sweep", "automation-webhooks"]);

@@ -1,3 +1,4 @@
+import { COMPUTER_TITLE } from "@cloudroom/domain/computer-name";
 import { useCallback, useEffect, useState } from "react";
 import {
   definePluginApp,
@@ -89,11 +90,11 @@ function AccountTile({
   const [editing, setEditing] = useState(false);
   const local = account.id === LOCAL;
   const fallback =
-    account.email ?? (local ? "This Mac" : `Account ${index + 1}`);
+    account.email ?? (local ? `This ${COMPUTER_TITLE}` : `Account ${index + 1}`);
   const name = account.name ?? fallback;
   const detail = [
     account.inUse ? "In use" : "Not in use",
-    local && account.email ? "This Mac" : null,
+    local && account.email ? `This ${COMPUTER_TITLE}` : null,
     account.name ? account.email : null,
     account.plan,
   ]

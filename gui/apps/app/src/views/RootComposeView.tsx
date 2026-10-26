@@ -7,6 +7,7 @@ import {
   useSystemProviders,
 } from "@/hooks/queries/system-queries";
 import {
+  COMPUTER,
   findLocalPathProjectSourceForHost,
   type EnvironmentStatus,
   type Host,
@@ -570,7 +571,7 @@ export function RootComposeView() {
               serviceTier: request.serviceTier,
             });
       if (createRequest === null)
-        throw new Error("This agent can't fork on this Mac. Pick Cloud instead.");
+        throw new Error(`This agent can't fork on this ${COMPUTER}. Pick Cloud instead.`);
       const thread = await createThread.mutateAsync(
         sendAt === undefined
           ? createRequest

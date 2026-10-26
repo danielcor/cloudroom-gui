@@ -33,7 +33,10 @@ export default async function plugin(bb: BbPluginApi) {
     serverUrl: resolveServerUrl(),
   });
 
-  bb.rpc.register(automationRpcContract, createRpcHandlers(service, bb.sdk));
+  bb.rpc.register(
+    automationRpcContract,
+    createRpcHandlers(service, bb.sdk, db),
+  );
   registerAutomationCli({ bb, service });
 
   const reviewChanged = (threadId: string) => {

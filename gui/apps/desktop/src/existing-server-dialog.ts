@@ -1,5 +1,5 @@
 import { ipcMain, type BrowserWindow } from "electron";
-import { escapeHtmlText } from "@cloudroom/domain";
+import { escapeHtmlText, COMPUTER } from "@cloudroom/domain";
 import {
   createDesktopDialogWindow,
   DESKTOP_DIALOG_BASE_CSS,
@@ -158,7 +158,7 @@ ${DESKTOP_DIALOG_BASE_CSS}
   </style>
 </head>
 <body>
-  <h1>Cloudroom is already running on this Mac</h1>
+  <h1>Cloudroom is already running on this ${COMPUTER}</h1>
   <p>${introText}</p>
   <div class="details">
       ${detailHtml}

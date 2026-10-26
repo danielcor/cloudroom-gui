@@ -50,6 +50,7 @@ const INSTALLED_AUTOMATIONS: AutomationsOverviewResponse["automations"] = [
       projectId: "proj_1",
       name: "Nightly digest",
       enabled: true,
+      priority: 3,
       trigger: {
         triggerType: "schedule",
         cron: "0 9 * * *",
@@ -124,6 +125,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -167,6 +169,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -216,6 +219,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={onOpenDetail}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -261,6 +265,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -304,6 +309,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -362,6 +368,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -415,6 +422,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -458,6 +466,7 @@ describe("AutomationOverviewView", () => {
           onRetry={() => {}}
           onOpenDetail={() => {}}
           onEnabledChange={async () => {}}
+          onPriorityChange={async () => {}}
           onCreateViaChat={() => {}}
           activeMode="installed"
           onModeChange={() => {}}
@@ -537,6 +546,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -554,8 +564,8 @@ describe("AutomationOverviewView", () => {
       "Codex ⇄ Claude Code·GPT-6.1 Sol ⇄ Opus 5.5 (1M)·Max",
     );
     expect(row("Plain script").textContent).toContain("Script");
-    expect(screen.queryByText("bb")).toBeNull();
-    expect(screen.getByText("Active loops").nextSibling?.textContent).toBe("3");
+    expect(screen.getAllByText("bb")).toHaveLength(3);
+    expect(screen.getByText("3 loops running")).toBeTruthy();
   });
 
   it("shows Personal as project membership and keeps it searchable", async () => {
@@ -579,6 +589,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -619,6 +630,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
@@ -634,59 +646,61 @@ describe("AutomationOverviewView", () => {
       ),
     ).toBeNull();
   });
-  it("keeps priorities set in other windows and follows their changes", async () => {
-    window.localStorage.clear();
+  it("shows each loop's saved priority, saves a new one, and drops a failed pick", async () => {
     const base = INSTALLED_AUTOMATIONS[0]!;
+    if ("problem" in base.automation) throw new Error("Expected a loop");
+    const first = { ...base, automation: { ...base.automation, priority: 1 } };
     const second = {
       ...base,
       automation: { ...base.automation, id: "auto_2", name: "Weekly report" },
     };
+    const onPriorityChange = vi
+      .fn<(route: { projectId: string; automationId: string }, priority: number) => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("offline"));
     render(
       <AutomationOverviewView
-        entries={[base, second]}
+        entries={[first, second]}
         error={null}
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={onPriorityChange}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}
       />,
     );
-    window.localStorage.setItem(
-      "cloudroom-loops:priorities",
-      JSON.stringify({ "local:auto_1": 1 }),
-    );
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: /^Priority 3 for Weekly report/ }),
-      { button: 0, ctrlKey: false },
-    );
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: /Priority 2/ }),
-    );
-    expect(
-      JSON.parse(window.localStorage.getItem("cloudroom-loops:priorities")!),
-    ).toEqual({ "local:auto_1": 1, "local:auto_2": 2 });
-    window.localStorage.setItem(
-      "cloudroom-loops:priorities",
-      JSON.stringify({ "local:auto_1": 4, "local:auto_2": 2 }),
-    );
+    const pick = async (name: string, level: number) => {
+      fireEvent.pointerDown(
+        screen.getByRole("button", { name: new RegExp(`^Priority \\d for ${name}`) }),
+        { button: 0, ctrlKey: false },
+      );
+      fireEvent.click(
+        await screen.findByRole("menuitem", { name: new RegExp(`Priority ${level}`) }),
+      );
+    };
     expect(
       screen.getByRole("button", { name: /^Priority 1 for Nightly digest/ }),
     ).toBeTruthy();
-    fireEvent(
-      window,
-      new StorageEvent("storage", { key: "cloudroom-loops:priorities" }),
+    await pick("Weekly report", 2);
+    expect(onPriorityChange).toHaveBeenCalledWith(
+      { projectId: "proj_1", automationId: "auto_2" },
+      2,
     );
     expect(
-      screen.getByRole("button", { name: /^Priority 4 for Nightly digest/ }),
+      screen.getByRole("button", { name: /^Priority 2 for Weekly report/ }),
     ).toBeTruthy();
-    window.localStorage.clear();
+    await pick("Nightly digest", 4);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^Priority 1 for Nightly digest/ }),
+      ).toBeTruthy(),
+    );
   });
 
-  it("gives loops added from a template the template's priority", async () => {
-    window.localStorage.clear();
-    const onAdd = vi.fn(async () => ["cloud:loop_new"]);
+  it("adds a template at the template's priority", async () => {
+    const onAdd = vi.fn(async () => {});
     render(
       <AutomationOverviewView
         entries={[]}
@@ -694,11 +708,14 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="templates"
         onModeChange={() => {}}
         templates={{
-          projects: [{ id: "proj_1", name: "Repo one", path: "/repo-one" }],
+          projects: [
+            { id: "proj_1", name: "Repo one", path: "/repo-one", github: null },
+          ],
           onAdd,
           locked: false,
           onUpgrade: () => {},
@@ -711,16 +728,12 @@ describe("AutomationOverviewView", () => {
     fireEvent.click(await screen.findByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Add to 1 repo" }));
     await waitFor(() =>
-      expect(
-        JSON.parse(window.localStorage.getItem("cloudroom-loops:priorities")!),
-      ).toEqual({ "cloud:loop_new": 1 }),
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Security sweep", priority: 1 }),
+        ["proj_1"],
+        "cloud",
+      ),
     );
-    expect(onAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Security sweep" }),
-      ["proj_1"],
-      "cloud",
-    );
-    window.localStorage.clear();
   });
 
   it("tags loops whose last run failed", () => {
@@ -742,6 +755,7 @@ describe("AutomationOverviewView", () => {
         onRetry={() => {}}
         onOpenDetail={() => {}}
         onEnabledChange={async () => {}}
+        onPriorityChange={async () => {}}
         onCreateViaChat={() => {}}
         activeMode="installed"
         onModeChange={() => {}}

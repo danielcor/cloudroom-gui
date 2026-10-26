@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { Host } from "@cloudroom/domain";
+import { COMPUTER, type Host } from "@cloudroom/domain";
 import { makeHost } from "@cloudroom/test-helpers/domain-fixtures";
 import { RETRY_ACTION_ICON } from "@cloudroom/domain/update-state";
 import { HOST_DAEMON_PROTOCOL_VERSION } from "@cloudroom/host-daemon-contract";
@@ -585,7 +585,7 @@ describe("MachinesSettingsSection", () => {
 
     expect(await screen.findByText("MacBook Air")).toBeDefined();
     expect(screen.getByText("Not running threads yet")).toBeDefined();
-    expect(screen.getByText("Every Mac signed in to your Cloudroom account shows up here by itself.")).toBeDefined();
+    expect(screen.getByText(`Every ${COMPUTER} signed in to your Cloudroom account shows up here by itself.`)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Run threads on it" }));
     await waitFor(() => {
       expect(vi.mocked(sdk.hosts.experimental_create)).toHaveBeenCalledWith(

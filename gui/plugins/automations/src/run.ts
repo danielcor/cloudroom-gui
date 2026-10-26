@@ -6,6 +6,7 @@ import {
   closeAutomationRun,
   disableAutomationsForDeletedThread,
   getAutomation,
+  listAutomationRuns,
   listRunningAutomationRuns,
   listRunningAutomationRunsByThread,
   markAutomationThread,
@@ -30,6 +31,9 @@ type AgentThreadsSdk = {
   spawn(
     args: Parameters<BbPluginApi["sdk"]["threads"]["spawn"]>[0],
   ): Promise<unknown>;
+  output?(
+    args: Parameters<BbPluginApi["sdk"]["threads"]["output"]>[0],
+  ): Promise<{ output?: string | null }>;
 };
 export type AgentRunApi = Pick<BbPluginApi, "realtime" | "log"> & {
   sdk: { threads: AgentThreadsSdk };
@@ -98,6 +102,65 @@ function isThreadReusable(thread: SdkThread): boolean {
   );
 }
 
+// Loop memory (ADR 0297): a fresh-thread run ends with a "Loop note:" line, and the next run gets the newest notes,
+// read from earlier runs' last replies. The same rules as Cloud loops (web/lib/automations.ts).
+const NOTES = 20;
+const NOTE = /^[\s>*_-]*Loop note:[*_]*[ \t]*(.{3,})$/gm;
+const NOTE_ASK =
+  'Loop memory: end your final message with one line that starts with "Loop note:" and says what you covered and the result, so later runs skip repeats.';
+
+/** The last "Loop note:" line in a run's reply, or null. */
+export function lastNote(reply: string): string | null {
+  const notes = [...reply.matchAll(NOTE)]
+    .map((match) =>
+      match[1]!
+        .replace(/[*_]+$/, "")
+        .trim()
+        .slice(0, 300),
+    )
+    .filter((note) => !note.startsWith("<"));
+  return notes.at(-1) ?? null;
+}
+
+// Loop run records (ADR 0298): every run reports what it did, why, and how sure it was. Same text as Cloud loops.
+const REPORT_ASK =
+  'Loop report: before your final message, run `room-cli loop report --outcome done|acted|needs-you|failed --confidence high|medium|low --reason "1-2 sentences on why"`, with one `--action "..."` per change you made (like `--action "merged #419"`). done: nothing needed doing; acted: you changed something; needs-you: you left it for the user.';
+
+export function memoryText(notes: string[]): string {
+  const past = notes.length
+    ? `\n\nPast runs of this loop, newest first (their Loop notes):\n${notes.map((note) => `- ${note}`).join("\n")}`
+    : "";
+  return `${past}\n\n${NOTE_ASK}\n\n${REPORT_ASK}`;
+}
+
+/** The newest notes from the loop's earlier runs, dated. A run whose reply can't be read is skipped. */
+async function pastNotes(
+  bb: AgentRunApi,
+  db: Db,
+  automationId: string,
+): Promise<string[]> {
+  const runs = listAutomationRuns(db, { automationId, limit: NOTES }).filter(
+    (run) => run.threadId !== null,
+  );
+  const notes = await Promise.all(
+    runs.map(async (run) => {
+      try {
+        const reply = await bb.sdk.threads.output?.({
+          threadId: run.threadId!,
+        });
+        const note = lastNote(reply?.output ?? "");
+        return (
+          note &&
+          `${new Date(run.startedAt).toISOString().slice(0, 10)}: ${note}`
+        );
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return notes.filter((note): note is string => Boolean(note));
+}
+
 interface AgentRunArgs {
   automation: AutomationRow;
   run: AutomationRunRow;
@@ -124,7 +187,11 @@ export async function executeAgentRun(
       await bb.sdk.threads.spawn({
         projectId: args.automation.projectId,
         environment: args.execution.environment,
-        prompt: withEvents(args.execution.prompt, args.events),
+        prompt: withEvents(
+          args.execution.prompt +
+            memoryText(await pastNotes(bb, db, args.automation.id)),
+          args.events,
+        ),
         title: args.automation.name,
         providerId: args.execution.providerId,
         model: args.execution.model,
@@ -220,7 +287,7 @@ async function reuseTargetThreadForRun(
         type: "text",
         text: renderAutomationDueMessage({
           automationId: args.automation.id,
-          prompt: withEvents(args.execution.prompt, args.events),
+          prompt: withEvents(`${args.execution.prompt}\n\n${REPORT_ASK}`, args.events),
         }),
         mentions: [],
       },

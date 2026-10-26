@@ -33,14 +33,15 @@ const LINUX_EXTRA_ZOOM_ITEMS: MenuItemConstructorOptions[] = [
 const SERVER_MENU_LABEL = "Server";
 const SERVER_MENU_ITEM_ID = "bb-server-menu";
 export const SET_SERVER_URL_MENU_LABEL = "Set Server URL…";
+const OTHER_COMPUTERS = process.platform === "darwin" ? "Macs" : "computers";
 export const CONNECT_SERVERS_SKIPPED_MENU_LABELS: Record<
   ComputersFailure,
   string
 > = {
-  "no-credential": "No other Macs — sign in to Cloudroom",
-  offline: "No other Macs — could not reach Cloudroom Connect",
-  unauthorized: "No other Macs — sign in to Cloudroom again",
-  unavailable: "No other Macs — could not reach Cloudroom Connect",
+  "no-credential": `No other ${OTHER_COMPUTERS} — sign in to Cloudroom`,
+  offline: `No other ${OTHER_COMPUTERS} — could not reach Cloudroom Connect`,
+  unauthorized: `No other ${OTHER_COMPUTERS} — sign in to Cloudroom again`,
+  unavailable: `No other ${OTHER_COMPUTERS} — could not reach Cloudroom Connect`,
 };
 
 interface ApplicationMenuServerItem {

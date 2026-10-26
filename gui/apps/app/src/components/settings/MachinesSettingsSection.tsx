@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { Host, PermissionMode } from "@cloudroom/domain";
+import { COMPUTER, type Host, type PermissionMode } from "@cloudroom/domain";
 import type { SystemMachineProvider } from "@cloudroom/server-contract";
 import { RETRY_ACTION_ICON } from "@cloudroom/domain/update-state";
 import type { HostPlatform } from "@cloudroom/host-daemon-contract";
@@ -418,7 +418,7 @@ export function MachinesSettingsSection() {
         title="Machines"
         description={
           macs.length > 1
-            ? "Every Mac signed in to your Cloudroom account shows up here by itself."
+            ? `Every ${COMPUTER} signed in to your Cloudroom account shows up here by itself.`
             : undefined
         }
         bodyClassName="flex flex-col gap-3"

@@ -55,20 +55,22 @@ export function CloudQueueCard({ queue, onUseLocal }: { queue: CloudQueue; onUse
 
 const share = (used: number, limit: number) => limit > 0 ? Math.min(used / limit, 1) : 1;
 
-/** Free accounts always see their usage. Pro accounts already pay, so theirs shows only once a limit is 80% used. */
+/** Free accounts always see their usage card. Paid plans see a quiet meter once a limit is 75% used. */
 export function PlanCard() {
   const usage = useCloudroomAccount().data?.planUsage ?? null;
-  const pro = usage?.plan === "pro";
+  const free = usage?.plan === "free";
   const rows = usage ? [
     { label: "cloud agents", used: usage.agents, limit: usage.agentsLimit },
     ...(usage.cpuHours === null ? [] : [{ label: "agent hours", used: usage.cpuHours, limit: usage.cpuHoursLimit }]),
   ] : [];
-  const hidden = !usage || (pro && !rows.some(({ used, limit }) => share(used, limit) >= 0.8));
+  const near = rows.filter(({ used, limit }) => share(used, limit) >= 0.75);
+  const hidden = !usage || (!free && !near.length);
   useUpgradePromptViewed(hidden ? null : "plan_card");
-  if (hidden) return null;
+  if (!usage || hidden) return null;
+  if (!free) return <PlanMeter plan={usage.plan} rows={near} />;
   return (
-    <section aria-label={pro ? "Pro plan" : "Free plan"} className="rounded-lg border border-border bg-surface-raised-solid p-3">
-      <p className="text-xs text-muted-foreground">{pro ? "Pro plan" : "Free plan"}</p>
+    <section aria-label="Free plan" className="rounded-lg border border-border bg-surface-raised-solid p-3">
+      <p className="text-xs text-muted-foreground">Free plan</p>
       {rows.map(({ label, used, limit }) => {
         const low = share(used, limit) >= 0.8;
         return (
@@ -78,10 +80,31 @@ export function PlanCard() {
           </div>
         );
       })}
-      <Button type="button" size="sm" variant={pro ? "outline" : "default"} className="mt-3 w-full justify-start" onClick={() => openUpgrade("plan_card")}>
-        <span className="min-w-0 truncate">{pro ? "Get 3× more with Super" : "Get 10× more with Pro"}</span><span className="ml-auto shrink-0 font-normal opacity-70">{pro ? "$150/mo" : "$50/mo"}</span><Icon name="ArrowRight" aria-hidden />
+      <Button type="button" size="sm" className="mt-3 w-full justify-start" onClick={() => openUpgrade("plan_card")}>
+        <span className="min-w-0 truncate">Get 10× more with Pro</span><span className="ml-auto shrink-0 font-normal opacity-70">$50/mo</span><Icon name="ArrowRight" aria-hidden />
       </Button>
     </section>
+  );
+}
+
+/** "Super 812 / 900 agent hours" over a thin bar: amber from 75%, red at the limit. Opens /billing. */
+function PlanMeter({ plan, rows }: { plan: string; rows: { label: string; used: number; limit: number }[] }) {
+  const name = plan.charAt(0).toUpperCase() + plan.slice(1);
+  return (
+    <button type="button" aria-label={`${name} plan usage`} className="w-full space-y-2 px-2 pb-1 text-left" onClick={() => openUpgrade("plan_card")}>
+      {rows.map(({ label, used, limit }) => {
+        const full = used >= limit;
+        return (
+          <div key={label}>
+            <p className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">{name}</span>
+              <span><span className={cn("font-semibold", full ? "text-destructive" : "text-warning")}>{Math.floor(used).toLocaleString("en-US")}</span><span className="text-muted-foreground"> / {Math.round(limit).toLocaleString("en-US")} {label}</span></span>
+            </p>
+            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10"><div className={cn("h-full rounded-full", full ? "bg-destructive" : "bg-warning")} style={{ width: `${share(used, limit) * 100}%` }} /></div>
+          </div>
+        );
+      })}
+    </button>
   );
 }
 
@@ -101,6 +124,42 @@ export function FreePlanTip() {
   const [reason] = useState(nextReason);
   if (usage?.plan !== "free") return null;
   return <UpgradeTip where="free_tip" className="mt-3 px-3.5">{reason}</UpgradeTip>;
+}
+
+const OG_HIDDEN_KEY = "cloudroom.ogLetterHiddenUntil";
+const HAND = { fontFamily: '"Bradley Hand", "Noteworthy", "Segoe Print", cursive' };
+
+/** David's letter to OG beta testers under the new-thread composer (ADR 0218). The website sends `og` only to OGs still
+ *  on the free Pro it gave them, never to Free, paying, or team accounts. "Not now" hides it for 3 days. */
+export function OgLetter() {
+  const og = useCloudroomAccount().data?.planUsage?.og ?? null;
+  const [hidden, setHidden] = useState(() => Number(localStorage.getItem(OG_HIDDEN_KEY)) > Date.now());
+  const show = Boolean(og) && !hidden;
+  useUpgradePromptViewed(show ? "og_letter" : null);
+  if (!og || !show) return null;
+  const ends = new Date(og.endsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const notNow = () => {
+    localStorage.setItem(OG_HIDDEN_KEY, String(Date.now() + 3 * 86_400_000));
+    setHidden(true);
+  };
+  return (
+    <section aria-label="A note from David" className="mt-3 rounded-sm bg-[#f3eee2] px-6 pb-3.5 pt-3 text-[#2a2a28] shadow-lg [background-image:repeating-linear-gradient(180deg,transparent_0_29px,rgba(70,110,160,0.16)_29px_30px)] [background-position:0_13px]">
+      <p className="text-lg leading-[30px]" style={HAND}>
+        {og.name ? `Hey ${og.name},` : "Hey,"}<br />
+        thanks for testing Cloudroom so early.<br />
+        Free Pro ends {ends}, but you keep 50% off forever.
+      </p>
+      <p className="mb-2.5 text-2xl" style={{ fontFamily: '"Snell Roundhand", "Bradley Hand", cursive' }}>David</p>
+      <div className="flex flex-wrap items-center gap-3 border-t border-black/10 pt-3">
+        <span className="border-[1.5px] border-dashed border-[#2a2a28] px-2 py-0.5 font-mono text-xs font-bold tracking-widest">OG50</span>
+        <span className="text-xs text-[#6b665b]">Only 39 people have this code</span>
+        <button type="button" className="ml-auto text-xs text-[#6b665b] hover:text-[#2a2a28]" onClick={notNow}>Not now</button>
+        <Button type="button" size="sm" className="border-[#1a1a1a] bg-[#1a1a1a] text-[#f3eee2] hover:bg-black" onClick={() => openUpgrade("og_letter", "https://www.cloudroom.dev/billing?keep=pro")}>
+          Keep Pro for $25/mo
+        </Button>
+      </div>
+    </section>
+  );
 }
 
 /** Sidebar footer badge while the account waits. Says so once when the account gets in. */

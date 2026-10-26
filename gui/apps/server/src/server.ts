@@ -64,8 +64,10 @@ import {
 } from "./internal/auth.js";
 import {
   captureTrustedRemoteAddress,
+  getGateAuthKind,
   resolveRequestAppSurface,
 } from "./request-context.js";
+import { notePhoneUse } from "./services/cloudroom/activation.js";
 import { runEventLoopWork } from "./services/system/event-loop-work.js";
 import { runWithTelemetryAppSurface } from "./services/system/telemetry.js";
 import {
@@ -191,7 +193,7 @@ function staticCacheControlForPath(urlPath: string): string {
   if (urlPath.startsWith("/assets/")) {
     return STATIC_ASSET_CACHE_CONTROL;
   }
-  if (urlPath.endsWith(".html") || urlPath === "/sw.js") {
+  if (urlPath.endsWith(".html") || urlPath === "/sw.js" || urlPath === "/app-files.json") {
     return STATIC_INDEX_CACHE_CONTROL;
   }
   return STATIC_PUBLIC_FILE_CACHE_CONTROL;
@@ -430,6 +432,7 @@ export function createApp(
 
   app.use("*", async (context, next) => {
     captureTrustedRemoteAddress(context);
+    if (getGateAuthKind(context) === "session") void notePhoneUse(deps).catch(() => {});
     return runWithTelemetryAppSurface(resolveRequestAppSurface(context), next);
   });
   app.use("*", async (context, next) => {

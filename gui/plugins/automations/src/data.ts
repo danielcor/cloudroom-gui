@@ -16,10 +16,12 @@ import {
   type AutomationRunStatus,
   type AutomationRunTrigger,
   type AutomationTrigger,
+  DEFAULT_LOOP_PRIORITY,
+  type LoopPriority,
 } from "./rpc-types.js";
 
 const AUTOMATION_COLUMNS = `id, project_id AS projectId, target_thread_id AS targetThreadId,
-  name, enabled, trigger_type AS triggerType,
+  name, enabled, priority, trigger_type AS triggerType,
   trigger_config AS triggerConfig, run_mode AS runMode, execution, origin,
   created_by_thread_id AS createdByThreadId,
   next_run_at AS nextRunAt, last_run_at AS lastRunAt,
@@ -45,6 +47,7 @@ export interface AutomationRow {
   targetThreadId: string | null;
   name: string;
   enabled: boolean;
+  priority: number;
   triggerType: AutomationTrigger["triggerType"];
   triggerConfig: string;
   runMode: AutomationRunMode;
@@ -231,6 +234,8 @@ export const migrations = [
    );
    CREATE INDEX IF NOT EXISTS automation_runs_started_idx
      ON automation_runs(started_at);`,
+  `ALTER TABLE automations
+     ADD COLUMN priority INTEGER NOT NULL DEFAULT 3;`,
 ];
 
 export const REVIEW_RETENTION_MS = 30 * 24 * 60 * 60_000;
@@ -251,10 +256,12 @@ export interface CreateAutomationInput {
   origin: AutomationOrigin;
   createdByThreadId: string | null;
   nextRunAt: number | null;
+  priority?: number;
 }
 
 export interface UpdateAutomationInput {
   name?: string;
+  priority?: number;
   trigger?: AutomationTrigger;
   execution?: AutomationExecution;
   targetThreadId?: string | null;
@@ -279,6 +286,7 @@ function resolveAutomationUpdate(
     patch.execution ?? parseAutomationExecution(existing.execution);
   return {
     name: patch.name ?? existing.name,
+    priority: patch.priority ?? existing.priority,
     trigger,
     execution,
     targetThreadId:
@@ -320,6 +328,7 @@ function automationResponseValue(
     projectId: row.projectId,
     name: row.name,
     enabled: row.enabled,
+    priority: row.priority as LoopPriority,
     trigger,
     execution,
     origin: row.origin,
@@ -433,12 +442,12 @@ export function createAutomation(
   const id = input.id ?? createAutomationId();
   db.prepare(
     `INSERT INTO automations (
-       id, project_id, target_thread_id, name, enabled, trigger_type,
+       id, project_id, target_thread_id, name, enabled, priority, trigger_type,
        trigger_config, run_mode, execution, origin,
        created_by_thread_id, next_run_at, last_run_at, run_count,
        last_run_status, last_run_thread_id, last_error, created_at, updated_at
      ) VALUES (
-       @id, @projectId, @targetThreadId, @name, @enabled, @triggerType,
+       @id, @projectId, @targetThreadId, @name, @enabled, @priority, @triggerType,
        @triggerConfig, @runMode, @execution, @origin,
        @createdByThreadId, @nextRunAt, NULL, 0, NULL, NULL, NULL, @now, @now
      )`,
@@ -451,6 +460,7 @@ export function createAutomation(
         : null,
     name: input.name,
     enabled: boolToInt(input.enabled),
+    priority: input.priority ?? DEFAULT_LOOP_PRIORITY,
     triggerType: input.trigger.triggerType,
     triggerConfig: serializeTrigger(input.trigger),
     runMode: input.runMode,
@@ -543,6 +553,7 @@ export function updateAutomation(
   const updated: AutomationRow = {
     ...existing,
     name: next.name,
+    priority: next.priority,
     triggerType: next.trigger.triggerType,
     triggerConfig: serializeTrigger(next.trigger),
     runMode: next.execution.mode,
@@ -555,6 +566,7 @@ export function updateAutomation(
   db.prepare(
     `UPDATE automations SET
        name = @name,
+       priority = @priority,
        trigger_type = @triggerType,
        trigger_config = @triggerConfig,
        run_mode = @runMode,
@@ -567,6 +579,7 @@ export function updateAutomation(
     automationId: updated.id,
     projectId: updated.projectId,
     name: updated.name,
+    priority: updated.priority,
     triggerType: updated.triggerType,
     triggerConfig: updated.triggerConfig,
     runMode: updated.runMode,

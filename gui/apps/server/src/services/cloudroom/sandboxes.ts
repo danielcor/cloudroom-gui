@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import type { HostDaemonContributedEnvEntry } from "@cloudroom/host-daemon-contract";
 import { findCliExecutable } from "@cloudroom/process-utils";
-import { rawThreadIdSchema, reasoningLevelSchema } from "@cloudroom/domain";
+import { rawThreadIdSchema, reasoningLevelSchema, COMPUTER } from "@cloudroom/domain";
 import { z } from "zod";
 import { hasSupportedFrontmatterDelimiter, parseFrontmatter } from "../skills/injected-skills.js";
 import { macClaudeSignedIn } from "./claude-token.js";
@@ -47,8 +47,9 @@ export type SandboxLogin = "claude" | "codex" | "pi" | "github" | "cursor" | "op
 export type SandboxProject = { id: string; repository: string | null; folder: string };
 const RECHECK_MS = 60_000;
 export type CloudQueue = { position: number; total: number; regionBlocked: boolean };
-/** A Free or Pro account's 30-day usage, for the sidebar upgrade card. The website sends `cpu_hours` as agent hours (ADR 0275). */
-export type PlanUsage = { plan: "free" | "pro"; agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number };
+/** A Free or Pro account's 30-day usage, for the sidebar upgrade card. The website sends `cpu_hours` as agent hours (ADR 0275).
+ *  `og` is the OG letter, which the website sends only to OGs still on the free Pro it gave them (ADR 0218). */
+export type PlanUsage = { plan: string; agents: number; agentsLimit: number; cpuHours: number | null; cpuHoursLimit: number; og: { name: string | null; endsAt: string } | null };
 const USAGE_LIMIT = "cloud_usage_limit";
 const AGENT_LIMIT = "cloud_agent_limit";
 const CLOUD_QUEUE = "cloud_queue";
@@ -80,7 +81,7 @@ export function codexLoginFailure(output: string): string {
     return last ? `Codex sign-in failed: ${last}` : "Codex sign-in did not finish. Click Connect to try again.";
   }
   const config = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml");
-  return `Codex on this Mac only allows API-key login, but Cloudroom needs ChatGPT sign-in. Remove \`forced_login_method = "api"\` from ${config}, then click Connect again. If the file is locked, run \`chflags nouchg ${config}\` first.`;
+  return `Codex on this ${COMPUTER} only allows API-key login, but Cloudroom needs ChatGPT sign-in. Remove \`forced_login_method = "api"\` from ${config}, then click Connect again. If the file is locked, run \`chflags nouchg ${config}\` first.`;
 }
 
 type MacCodexLogin = { child: ChildProcess; url: string | null; error: string | null; done: boolean };
@@ -96,7 +97,7 @@ export function startMacCodexLogin(): MacCodexLogin {
   child.stderr?.on("data", read);
   child.on("error", (error: NodeJS.ErrnoException) => {
     run.done = true;
-    run.error = error.code === "ENOENT" ? "Codex is not installed on this Mac. Install it with `npm i -g @openai/codex`, then click Connect again." : `Codex sign-in could not start: ${error.message}`;
+    run.error = error.code === "ENOENT" ? `Codex is not installed on this ${COMPUTER}. Install it with \`npm i -g @openai/codex\`, then click Connect again.` : `Codex sign-in could not start: ${error.message}`;
   });
   // A cancel or the 10-minute timeout kills Codex (code null); only a real exit has an error worth showing.
   child.on("exit", code => { run.done = true; if (code !== 0) run.error ??= codexLoginFailure(code === null ? "" : output); });
@@ -661,17 +662,19 @@ export class SandboxDirectory {
   currentPlan(): string | null { return this.plan; }
   private usage: { value: PlanUsage | null; next: number } | null = null;
   private checkingUsage = false;
-  /** A Free or Pro account's usage; null for other plans, in the cloud queue, or before the website answers. Its plan is
+  /** The account's usage; null while billing is off, in the cloud queue, or before the website answers. Its plan is
    *  refreshed with forNewThreads(); the usage itself as often as the website says. */
   planUsage(): PlanUsage | null {
-    if ((this.plan !== "free" && this.plan !== "pro") || this.queue) return null;
+    if (!this.plan || this.queue) return null;
     if (!this.checkingUsage && Date.now() >= (this.usage?.next ?? 0)) {
       this.checkingUsage = true;
       void this.call({ action: "usage" }).then((value) => {
-        const parsed = z.object({ plan: z.enum(["free", "pro"]), agents: z.number(), agents_limit: z.number(), cpu_hours: z.number().nullable(), cpu_hours_limit: z.number() }).safeParse(value);
+        const parsed = z.object({ plan: z.string(), agents: z.number(), agents_limit: z.number(), cpu_hours: z.number().nullable(), cpu_hours_limit: z.number(),
+          og: z.object({ name: z.string().nullable(), ends_at: z.string() }).nullable().catch(null) }).safeParse(value);
         const recheck = z.object({ recheck_seconds: z.number().default(600) }).parse(value).recheck_seconds;
         this.usage = {
-          value: parsed.success ? { plan: parsed.data.plan, agents: parsed.data.agents, agentsLimit: parsed.data.agents_limit, cpuHours: parsed.data.cpu_hours, cpuHoursLimit: parsed.data.cpu_hours_limit } : null,
+          value: parsed.success ? { plan: parsed.data.plan, agents: parsed.data.agents, agentsLimit: parsed.data.agents_limit, cpuHours: parsed.data.cpu_hours, cpuHoursLimit: parsed.data.cpu_hours_limit,
+            og: parsed.data.plan === "pro" && parsed.data.og ? { name: parsed.data.og.name, endsAt: parsed.data.og.ends_at } : null } : null,
           next: Date.now() + Math.max(recheck, 60) * 1000,
         };
       }, () => { this.usage = { value: this.usage?.value ?? null, next: Date.now() + RECHECK_MS }; }).finally(() => { this.checkingUsage = false; });
@@ -812,7 +815,7 @@ export class SandboxDirectory {
   async setMacMcp(names: string[], cloud: boolean): Promise<CloudEnvironment> {
     if (!cloud) return this.environment({ action: "mcp", servers: {}, remove: names });
     const servers = Object.fromEntries((await macMcpServers()).flatMap(({ name, server }) => server && names.includes(name) ? [[name, server]] : []));
-    if (!Object.keys(servers).length) throw new CloudroomError("Those MCP servers only work on this Mac.", 400);
+    if (!Object.keys(servers).length) throw new CloudroomError(`Those MCP servers only work on this ${COMPUTER}.`, 400);
     return this.environment({ action: "mcp", servers, remove: [] });
   }
   /** Copies edits to this Mac's MCP servers, such as a new key, to the ones already in the cloud. At most once a minute;

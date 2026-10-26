@@ -1,3 +1,4 @@
+import { COMPUTER_TITLE } from "@cloudroom/domain";
 import { useMemo, useRef, useState } from "react";
 import type { RepoSuggestion } from "@cloudroom/sdk/browser";
 import { Button } from "@cloudroom/shared-ui/button";
@@ -29,7 +30,7 @@ const VISIBLE_REPO_SUGGESTIONS = 5;
 const REPO_FILTERS = [
   { id: "all", label: "All" },
   { id: "github", label: "GitHub" },
-  { id: "mac", label: "Mac" },
+  { id: "mac", label: COMPUTER_TITLE },
 ] as const;
 type RepoFilter = (typeof REPO_FILTERS)[number]["id"];
 

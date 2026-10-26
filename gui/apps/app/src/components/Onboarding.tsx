@@ -3,7 +3,7 @@ import { atom, useAtom, useSetAtom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { deriveProjectNameFromPath } from "@cloudroom/domain";
+import { deriveProjectNameFromPath, COMPUTER } from "@cloudroom/domain";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { ClaudeConnectionButton, useClaudeConnection } from "@/components/ClaudeConnection";
@@ -442,10 +442,10 @@ function AgentStep({ progress, next, stamped, left, choices, setChoices }: { pro
         </div>
       ) : <Heading lead="Connect an" mark="agent" />}
       <div className="mt-8 flex flex-col gap-3">
-        <Card on={agents.claude} isDefault={agents.claude && defaultAgent === "claude-code"} logo={<AgentLogo id="claude-code" className="bg-[#f4e4d6]" />} name="Claude Code" detail={claudeLocal.data?.state === "connected" ? "Found on this Mac" : "Uses your Claude plan"}>
+        <Card on={agents.claude} isDefault={agents.claude && defaultAgent === "claude-code"} logo={<AgentLogo id="claude-code" className="bg-[#f4e4d6]" />} name="Claude Code" detail={claudeLocal.data?.state === "connected" ? `Found on this ${COMPUTER}` : "Uses your Claude plan"}>
           {action(agents.claude, <span onClickCapture={() => started("claude")}><ClaudeConnectionButton target="cloud" presentation="inline" className={CONNECT} /></span>)}
         </Card>
-        <Card on={agents.codex} isDefault={agents.codex && defaultAgent === "codex"} logo={<AgentLogo id="codex" className="bg-black text-white" />} name="Codex" detail={account.data?.localLogins?.codex ? "Found on this Mac" : "Uses your ChatGPT plan"}>
+        <Card on={agents.codex} isDefault={agents.codex && defaultAgent === "codex"} logo={<AgentLogo id="codex" className="bg-black text-white" />} name="Codex" detail={account.data?.localLogins?.codex ? `Found on this ${COMPUTER}` : "Uses your ChatGPT plan"}>
           {action(agents.codex, codexBrowser ? (
             <Note>
               Finish in your browser.{" "}
@@ -514,7 +514,7 @@ function MoreAgents({ agents, picked, pick }: { agents: string[]; picked: string
   if (!shown.length) return null;
   return (
     <div className="mt-3.5 flex flex-wrap items-center gap-1.5 text-[13px]">
-      <span className="mr-1 text-(--ob-muted)">Also on this Mac</span>
+      <span className="mr-1 text-(--ob-muted)">Also on this {COMPUTER}</span>
       {shown.map(({ id, displayName }) => {
         const on = id === picked;
         return (
@@ -598,7 +598,7 @@ function GithubStep({ progress, next }: { progress: ReturnType<typeof useSetupPr
   };
   const detail = connected
     ? "Cloud agents can use your repos."
-    : !account.data?.account ? "Log in first" : offline ? "Cloud unreachable" : !ready ? "Starting your cloud…" : "Not found on this Mac. You'll copy a code, then paste it on github.com.";
+    : !account.data?.account ? "Log in first" : offline ? "Cloud unreachable" : !ready ? "Starting your cloud…" : `Not found on this ${COMPUTER}. You'll copy a code, then paste it on github.com.`;
   if (code) {
     return (
       <>
@@ -703,7 +703,7 @@ function ProjectStep({ close, added, setAdded, imported, setImported }: {
     quickCreate.openCreateDialog();
   };
   const bringWorkOver = () => {
-    if (!localHostId) return appToast.error("This Mac is not connected yet. Try again in a moment.");
+    if (!localHostId) return appToast.error(`This ${COMPUTER} is not connected yet. Try again in a moment.`);
     track("project", "started", "bb_import");
     importBb.mutate(localHostId, {
       onSuccess: ({ imported }) => {
@@ -737,7 +737,7 @@ function ProjectStep({ close, added, setAdded, imported, setImported }: {
       </div>
       {recent.length > 0 && (
         <div className="mt-9 max-w-[640px]">
-          <p className="mb-2.5 text-[11.5px] tracking-[0.12em] text-(--ob-muted) uppercase">{empty ? "Recent on this Mac" : "Or add a recent folder"}</p>
+          <p className="mb-2.5 text-[11.5px] tracking-[0.12em] text-(--ob-muted) uppercase">{empty ? `Recent on this ${COMPUTER}` : "Or add a recent folder"}</p>
           <ul className="divide-y divide-(--ob-line) border-[1.5px] border-(--ob-ink) bg-(--ob-card)">
             {recent.map((repo) => (
               <li key={repo.path} className="flex items-center gap-4 px-5 py-3.5">

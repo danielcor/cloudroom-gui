@@ -8,7 +8,7 @@ import { SETTINGS_CARD_CLASS, SETTINGS_CARD_ROW_CLASS, SettingsSection } from "@
 import { sdk } from "@/lib/sdk";
 import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
 import { useCloudroomAccount } from "@/hooks/queries/cloudroom-queries";
-import { MacAccessMenuItems, useMacAccessLevel } from "@/components/sidebar/MacAccessChip";
+import { MacAccessMenuItems, useMacAccessLevel, MAC_ACCESS_TITLE } from "@/components/sidebar/MacAccessChip";
 import { FixPrompt } from "@/components/ui/fix-prompt";
 import { ConfirmDeleteDialog, ConfirmDeleteDialogContent } from "@/components/dialogs/ConfirmDeleteDialog";
 import { cloudUnavailableFixPrompt, syncFixPrompt } from "@/lib/fix-prompts";
@@ -75,7 +75,7 @@ export function CloudroomAccountSettings() {
         {!ready && <FixPrompt prompt={cloudUnavailableFixPrompt(status.data?.error)} />}
         {sync && (sync.issue || sync.conflicts) ? <p role="status" className="text-sm">{sync.issue ?? `${sync.conflicts} conflicting files need review.`}</p> : null}
         {previews?.explained && previews.state !== "connected" && previews.message ? <div role="status" className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-center text-sm">
-          <p className="flex items-center justify-center gap-1.5 font-medium text-foreground"><Icon name="AlertTriangle" className="size-4 shrink-0 text-warning-text" aria-hidden />Mac access and previews can't connect</p>
+          <p className="flex items-center justify-center gap-1.5 font-medium text-foreground"><Icon name="AlertTriangle" className="size-4 shrink-0 text-warning-text" aria-hidden />{MAC_ACCESS_TITLE} and previews can't connect</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {previews.message}{" "}
             {check.isPending ? "Checking…" : <>{check.isSuccess && "Still can't connect. "}<Button variant="link" className="h-auto p-0 align-baseline text-xs font-normal text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => check.mutate()}>Check now</Button></>}
@@ -126,14 +126,14 @@ function MacAccessRow() {
   return <div className={SETTINGS_CARD_CLASS}>
     <div className={SETTINGS_CARD_ROW_CLASS}>
       <div className="min-w-0 flex-1">
-        <p className="text-foreground">Mac access</p>
+        <p className="text-foreground">{MAC_ACCESS_TITLE}</p>
         <p className="text-xs text-subtle-foreground/75">{current.description}</p>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" aria-label={`Mac access: ${current.label}`} disabled={saving}>{current.label}<Icon name="ChevronDown" className="text-muted-foreground" aria-hidden /></Button>
+          <Button variant="outline" size="sm" aria-label={`${MAC_ACCESS_TITLE}: ${current.label}`} disabled={saving}>{current.label}<Icon name="ChevronDown" className="text-muted-foreground" aria-hidden /></Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" mobileTitle="Mac access" className="w-72 p-1.5"><MacAccessMenuItems current={current} select={select} /></DropdownMenuContent>
+        <DropdownMenuContent align="end" mobileTitle={MAC_ACCESS_TITLE} className="w-72 p-1.5"><MacAccessMenuItems current={current} select={select} /></DropdownMenuContent>
       </DropdownMenu>
     </div>
   </div>;

@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir, stat, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { and, desc, eq, inArray, isNull, max, notInArray } from "drizzle-orm";
 import { createThread, findLastCompletedRootStoredTurn, getAppSettings, getProject, getThread, getThreadExecutionOverride, setThreadExecutionOverride, updateThread, cloudroomThreads, cloudroomCommands, events, threads, type DbConnection, type DbQueryConnection, type DbTransaction } from "@cloudroom/db";
-import { PERSONAL_PROJECT_ID, encodeClientTurnRequestIdNumber, isStandaloneBuiltinCompactCommand, promptInputSchema, reasoningLevelSchema, threadQueuedMessageSchema, type Thread, type PromptInput, type ThreadEventType, type ThreadEventTurnStatus, type ThreadChangeKind, type ReasoningLevel } from "@cloudroom/domain";
+import { PERSONAL_PROJECT_ID, encodeClientTurnRequestIdNumber, isStandaloneBuiltinCompactCommand, promptInputSchema, reasoningLevelSchema, threadQueuedMessageSchema, type Thread, type PromptInput, type ThreadEventType, type ThreadEventTurnStatus, type ThreadChangeKind, type ReasoningLevel, COMPUTER, COMPUTER_TITLE } from "@cloudroom/domain";
 import type { CreateThreadRequest, ForkThreadRequest, SendMessageRequest, SendMessageResponse } from "@cloudroom/server-contract";
 import { z } from "zod";
 import { findCliExecutable } from "@cloudroom/process-utils";
@@ -1020,7 +1020,7 @@ class CloudroomService {
     if (sandbox) {
       if (action === "token" && code) await this.sandboxes.saveLogin("claude", JSON.stringify({ token: code, ...(state ? { plan: state } : {}) }));
       else if (action === "key" && code) await this.sandboxes.saveLogin("claude", JSON.stringify({ apiKey: code }));
-      else if (action === "login" || action === "complete") throw new ApiError(409, "claude_auth_unsupported", "Cloud sandboxes connect Claude with a one-year token from this Mac. Use Connect Claude.");
+      else if (action === "login" || action === "complete") throw new ApiError(409, "claude_auth_unsupported", `Cloud sandboxes connect Claude with a one-year token from this ${COMPUTER}. Use Connect Claude.`);
       if ((action === "token" || action === "key") && code) {
         void this.syncLogins(true);
         if ((await this.savedConnection())?.token) await this.vmClaudeAuth(action, requestId, code, state).catch(error => this.warn("Claude could not be connected on the VM", error));
@@ -1044,11 +1044,11 @@ class CloudroomService {
       // Signing in copies this Mac's Cursor login; clicking is the consent, even when automatic copying is off.
       if (action === "login") {
         const login = await macCursorLogin();
-        if (!login) throw new ApiError(409, "cursor_auth_required", "Cursor is not signed in on this Mac. Run `cursor-agent login` in your terminal, then click Sign in with Cursor again, or use a Cursor API key.");
+        if (!login) throw new ApiError(409, "cursor_auth_required", `Cursor is not signed in on this ${COMPUTER}. Run \`cursor-agent login\` in your terminal, then click Sign in with Cursor again, or use a Cursor API key.`);
         await this.sandboxes.saveLogin("cursor", login);
         return { ...sandbox, state: "connected" as const };
       }
-      if (action !== "key") return sandbox.state === "connected" ? sandbox : { ...sandbox, message: "Cloud threads use this Mac's Cursor login, or a Cursor user API key." };
+      if (action !== "key") return sandbox.state === "connected" ? sandbox : { ...sandbox, message: `Cloud threads use this ${COMPUTER}'s Cursor login, or a Cursor user API key.` };
       const key = apiKey?.trim() ?? "";
       if (!/^[\x21-\x7e]{1,4096}$/.test(key)) throw new ApiError(400, "invalid_request", "Enter a valid Cursor API key.");
       if (await cursorKeyRejected(key)) throw new ApiError(400, "invalid_request", "Cursor says this API key is invalid. Check it and try again.");
@@ -1083,10 +1083,10 @@ class CloudroomService {
       if (action === "cancel") cancelMacCodexLogin();
       if (action === "login") {
         const account = sandbox.state === "connected" ? await this.codexAccounts.selected() : null;
-        if (account) throw new ApiError(409, "codex_account_rejected", `Cloud uses your Codex account ${account}. Sign in to it again with Add in Settings → Agents → Codex, or pick This Mac there.`);
+        if (account) throw new ApiError(409, "codex_account_rejected", `Cloud uses your Codex account ${account}. Sign in to it again with Add in Settings → Agents → Codex, or pick This ${COMPUTER_TITLE} there.`);
         if (await copyLogins(this.deps) !== true) {
           reportAgentConnect("codex", "failed", { code: "copy_logins_off" });
-          throw new ApiError(409, "codex_auth_unsupported", "Cloud sandboxes use this Mac's Codex login. Turn on \"Auth my agents in the cloud automatically\" in Settings → Cloud, then try again.");
+          throw new ApiError(409, "codex_auth_unsupported", `Cloud sandboxes use this ${COMPUTER}'s Codex login. Turn on "Auth my agents in the cloud automatically" in Settings → Cloud, then try again.`);
         }
         // Signed out or expired here, or the cloud rejected the saved login: sign in on this Mac first, then the next status check copies the new login.
         if (sandbox.state !== "connected" && await hasMacCodexLogin() && !await macCodexLoginExpired()) {
@@ -2158,7 +2158,7 @@ class CloudroomService {
         ]);
         saveBinding(this.deps.db, threadId, { sessionId: started.sessionId, error: null });
         saved = binding(this.deps.db, threadId)!;
-        const copying = copy?.clone && copy.repository ? `Cloning ${copy.repository.replace("https://github.com/", "")}` : copy?.copyAll ? "Copying project from your Mac" : null;
+        const copying = copy?.clone && copy.repository ? `Cloning ${copy.repository.replace("https://github.com/", "")}` : copy?.copyAll ? `Copying project from your ${COMPUTER}` : null;
         const files: StartStep[] = copying ? [{ key: "files", text: copying, status: "started" }] : [];
         const forkCode: StartStep[] = started.code ? [{ key: "fork", text: "Copying the source thread's code", status: "started" }] : [];
         this.progress(threadId, [{ key: "agent", status: "completed" }, ...files, ...forkCode], "completed");
@@ -2233,7 +2233,7 @@ class CloudroomService {
             let context = parsed.workspaceContext;
             if (context === undefined) {
               const copying = pending.id === `first_${threadId}` && ["cloning", "uploading", "waiting"].includes(projectCopyProgress(this.deps.db, threadId)?.phase ?? "");
-              const hint = fork || (child && getThread(this.deps.db, threadId)?.originKind === "fork") ? FORK_HINT : child ? CHILD_HINT : copying ? "[Cloud workspace context]\nThis project is new on the VM. Cloudroom is copying its files into this folder right now: a GitHub clone or an upload from the user's Mac, plus uncommitted edits and .env files. Run `room-cli files wait` before you rely on them; it returns once they land, or says why they won't. Never recreate missing files or instructions such as AGENTS.md." : null;
+              const hint = fork || (child && getThread(this.deps.db, threadId)?.originKind === "fork") ? FORK_HINT : child ? CHILD_HINT : copying ? `[Cloud workspace context]\nThis project is new on the VM. Cloudroom is copying its files into this folder right now: a GitHub clone or an upload from the user's ${COMPUTER}, plus uncommitted edits and .env files. Run \`room-cli files wait\` before you rely on them; it returns once they land, or says why they won't. Never recreate missing files or instructions such as AGENTS.md.` : null;
               context = hint && Buffer.byteLength(`${enriched.text}\n\n${hint}`, "utf8") <= cloudPromptLimit(capabilities) ? hint : null;
               this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(pending.input), workspaceContext: context }) }).where(eq(cloudroomCommands.id, pending.id)).run();
             }
@@ -2527,7 +2527,7 @@ class CloudroomService {
         const providerId = input.provider ? (Object.keys(CLOUD_HARNESSES) as CloudProvider[]).find(id => CLOUD_HARNESSES[id] === input.provider) : parentThread.providerId;
         if (!providerId) throw new ApiError(400, "cloudroom_unsupported", `Cloud has no ${input.provider} agent.`);
         const same = providerId === parentThread.providerId;
-        if (input.machine === "local") throw new ApiError(403, "cloudroom_unsupported", "Cloud agents fork only to Cloud. Omit --machine; only the user can fork to their Mac, from the Cloudroom app.");
+        if (input.machine === "local") throw new ApiError(403, "cloudroom_unsupported", `Cloud agents fork only to Cloud. Omit --machine; only the user can fork to their ${COMPUTER}, from the Cloudroom app.`);
         if (!findLastCompletedRootStoredTurn(this.deps.db, { threadId: parentThread.id })) throw new ApiError(409, "fork_source_session_unavailable", "This thread has no finished turn to fork yet: a fork starts at the last finished turn, and this is the first one. Fork in a later turn.");
         const profile = input.model || same ? null : harnessProfile(await this.savedCapabilities() ?? await this.capabilities(client), providerId);
         const model = input.model ?? (same ? parent.model : profile && (providerId === "pi" && profile.provider ? `${profile.provider}/${profile.model}` : profile.model));

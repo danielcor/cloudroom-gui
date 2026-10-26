@@ -1,3 +1,4 @@
+import { COMPUTER } from "@cloudroom/domain";
 import { serverAccess } from "../services/machines/server-access.js";
 import { getNonDestroyedHost, updateHost } from "@cloudroom/db";
 import {
@@ -96,7 +97,7 @@ async function revokeConnectMachineCredential(
   } catch (error) {
     deps.logger.error(
       { err: error, machineId },
-      "Host was removed locally, but its Cloudroom Connect machine credential could not be revoked. Its relay access stays until the Mac signs out of Cloudroom.",
+      `Host was removed locally, but its Cloudroom Connect machine credential could not be revoked. Its relay access stays until the ${COMPUTER} signs out of Cloudroom.`,
     );
   }
 }
