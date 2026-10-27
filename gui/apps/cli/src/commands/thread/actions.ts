@@ -62,6 +62,7 @@ interface ThreadArchiveCommandOptions {
 interface ThreadUnarchiveCommandOptions {
   self?: boolean;
   json?: boolean;
+  keepParent?: boolean;
 }
 
 interface ThreadPinCommandOptions {
@@ -350,13 +351,20 @@ export function registerActionsCommands(
     .command("unarchive [id]")
     .description("Unarchive a thread")
     .option("--self", "Target the current thread (from ROOM_THREAD_ID)")
+    .option(
+      "--keep-parent",
+      "Keep the thread under its parent, even an archived one",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(
         async (id: string | undefined, opts: ThreadUnarchiveCommandOptions) => {
           const threadId = requireThreadIdOrSelf(id, opts);
           const sdk = createCliBbSdk(getUrl());
-          await sdk.threads.unarchive({ threadId });
+          await sdk.threads.unarchive({
+            threadId,
+            keepParent: opts.keepParent,
+          });
           if (outputJson(opts, { ok: true, threadId })) return;
           console.log(`Thread ${threadId} unarchived`);
         },

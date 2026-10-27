@@ -37,6 +37,7 @@ import {
   cancelRetriesForExplicitStop,
   retryFailedTurn,
 } from "../../services/threads/turn-retry.js";
+import { cancelInterruptedThreadStartInput } from "../../services/threads/thread-startup-store.js";
 import {
   requireConnectedHostSession,
   requirePublicThread,
@@ -338,6 +339,7 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
     });
     teleports(deps).abandon(thread.id);
     const cancelledRetries = cancelRetriesForExplicitStop(deps, thread.id);
+    cancelInterruptedThreadStartInput(deps.db, thread.id);
     await stopThreadForCurrentState(deps, thread, environment);
     return context.json({ ok: true, cancelledRetries });
   });

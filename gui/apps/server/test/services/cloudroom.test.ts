@@ -10,7 +10,7 @@ import { command, saveTeleportProgress } from "../../src/services/cloudroom/stor
 import { teleports } from "../../src/services/cloudroom/teleport.js";
 import { createTestAppHarness } from "../helpers/test-app.js";
 import { seedEnvironment, seedHostSession, seedPrimaryHost, seedProjectWithSource, seedThread, seedThreadRuntimeState } from "../helpers/seed.js";
-import { createThread, getThread, setProjectGitRemoteUrlIfMissing, events, cloudroomThreads, cloudroomCommands } from "@cloudroom/db";
+import { archiveThread, createThread, getThread, setProjectGitRemoteUrlIfMissing, events, cloudroomThreads, cloudroomCommands } from "@cloudroom/db";
 
 it("forwards Cursor login and keys without creating conversation records", async () => {
   const harness = await createTestAppHarness();
@@ -665,6 +665,92 @@ it.each(["codex", "pi"])("renames a Cloud %s thread offline without native execu
     expect(listQueuedCommands(harness, "thread.rename")).toEqual([]);
     expect(harness.db.select().from(cloudroomCommands).all()).toEqual([]);
   } finally { await harness.cleanup(); }
+});
+
+it("lets a Cloud thread clear or keep its parent, re-links one in its own sandbox, and keeps a shared-sandbox child put", async () => {
+  const harness = await createTestAppHarness();
+  let labelFails = false, replyLost = false;
+  const labels: { thread: string; parent: string | null; local: string | null | undefined }[] = [];
+  const website = createServer(async (req, res) => {
+    let text = ""; for await (const chunk of req) text += chunk;
+    const input = text ? JSON.parse(text) : {};
+    if (input.action === "label") labels.push({ thread: input.thread, parent: input.parent, local: getThread(harness.db, input.thread)?.parentThreadId });
+    const lost = replyLost && input.action === "label";
+    if (lost) replyLost = false;
+    res.writeHead((labelFails || lost) && input.action === "label" ? 503 : 200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(req.url === "/api/desktop/logins" ? { claude: false, codex: false, pi: false, github: false } : input.action === "label" ? { saved: true } : {}));
+  });
+  website.listen(0, "127.0.0.1"); await once(website, "listening");
+  const address = website.address(); if (!address || typeof address === "string") throw new Error("fixture did not listen");
+  try {
+    await cloudroom(harness.deps).configure(null, { id: "11111111-1111-4111-8111-111111111111", email: "parent@example.com" }, undefined, `http://127.0.0.1:${address.port}`, "a".repeat(64));
+    const { host } = seedHostSession(harness.deps);
+    const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
+    const lead = seedThread(harness.deps, { projectId: project.id });
+    const cloud = (parentThreadId?: string) => createThread(harness.db, harness.hub, { projectId: project.id, parentThreadId, executionTarget: "cloud", providerId: "codex", status: "idle" });
+    const cloudParent = cloud(), own = cloud(lead.id), shared = cloud(cloudParent.id);
+    harness.db.insert(cloudroomThreads).values([cloudParent, own, shared].map((thread, index) => ({ threadId: thread.id, coreUrl: `sandbox:${thread === shared ? cloudParent.id : thread.id}`, sessionId: `cr_${index}`, startRequestId: `start_${index}`, model: "test-model", reasoning: "medium" }))).run();
+    const patch = (id: string, parentThreadId: string | null, extra = {}) => harness.app.request(`/api/v1/threads/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parentThreadId, ...extra }) });
+    const parentOf = (id: string) => getThread(harness.db, id)?.parentThreadId;
+
+    expect((await patch(own.id, lead.id)).status).toBe(200);
+    labelFails = true;
+    const unsaved = await patch(own.id, null);
+    expect({ status: unsaved.status, parent: parentOf(own.id) }).toEqual({ status: 503, parent: lead.id });
+    labelFails = false;
+    const archived = seedThread(harness.deps, { projectId: project.id });
+    archiveThread(harness.db, harness.hub, archived.id);
+    const tried = labels.length, archivedParent = await patch(own.id, archived.id), selfParent = await patch(own.id, own.id);
+    expect({ archived: archivedParent.status, self: selfParent.status, labels: labels.length }).toEqual({ archived: 400, self: 400, labels: tried });
+    const noSection = await patch(own.id, null, { sectionId: "sec_missing" }), withModel = await patch(own.id, null, { model: "other-model" }), badTitle = await patch(own.id, null, { title: 123 });
+    expect({ section: noSection.status, model: withModel.status, title: badTitle.status, labels: labels.length, parent: parentOf(own.id) }).toEqual({ section: 404, model: 400, title: 400, labels: tried, parent: lead.id });
+    replyLost = true;
+    const lost = await patch(own.id, null), retried = await patch(own.id, null);
+    expect({ lost: lost.status, retried: retried.status, parent: parentOf(own.id) }).toEqual({ lost: 503, retried: 200, parent: null });
+    expect(labels.at(-1)).toEqual({ thread: own.id, parent: null, local: lead.id });
+    expect(parentOf(own.id)).toBeNull();
+    expect((await patch(own.id, lead.id)).status).toBe(200);
+    expect(parentOf(own.id)).toBe(lead.id);
+    const service = cloudroom(harness.deps) as unknown as { childTurnEnded?: (child: { id: string; parentThreadId: string }, status: string) => void; tellLocalParent(threadId: string, status: string, turn: string): void; noticeCloudParent(threadId: string, status: string, turn: string): Promise<void> };
+    const reports = vi.fn();
+    service.childTurnEnded = reports;
+    service.tellLocalParent(own.id, "completed", "turn-1");
+    expect(reports).toHaveBeenCalledWith(expect.objectContaining({ id: own.id, parentThreadId: lead.id }), "completed");
+    expect((await patch(own.id, cloudParent.id)).status).toBe(200);
+    expect(parentOf(own.id)).toBe(cloudParent.id);
+
+    const moved = await patch(shared.id, lead.id);
+    expect(moved.status).toBe(409);
+    expect(await moved.json()).toMatchObject({ message: "Only a Cloud thread in its own sandbox can move under another parent. Clear its parent (--clear-parent-thread) to make it top-level." });
+    expect(parentOf(shared.id)).toBe(cloudParent.id);
+    expect((await patch(shared.id, cloudParent.id)).status).toBe(200);
+    expect((await patch(shared.id, null)).status).toBe(200);
+    expect(parentOf(shared.id)).toBeNull();
+    const topLevel = await patch(shared.id, lead.id);
+    expect(topLevel.status).toBe(409);
+    expect(await topLevel.json()).toMatchObject({ message: "Only a Cloud thread in its own sandbox can get a parent." });
+    const owner = await patch(cloudParent.id, shared.id);
+    expect({ status: owner.status, body: await owner.json() }).toMatchObject({ status: 409, body: { message: "A Cloud thread can't move under a thread that shares its sandbox." } });
+    const vm = cloud(lead.id);
+    harness.db.insert(cloudroomThreads).values({ threadId: vm.id, coreUrl: "http://127.0.0.1:9", sessionId: "cr_vm", startRequestId: "start_vm", model: "test-model", reasoning: "medium" }).run();
+    expect((await patch(vm.id, lead.id)).status).toBe(200);
+    const cleared = await patch(vm.id, null);
+    expect(cleared.status).toBe(409);
+    expect(await cleared.json()).toMatchObject({ message: "A thread on your cloud VM can't change its parent." });
+    expect(parentOf(vm.id)).toBe(lead.id);
+    const other = cloud();
+    harness.db.insert(cloudroomThreads).values({ threadId: other.id, coreUrl: `sandbox:${other.id}`, sessionId: "cr_other", startRequestId: "start_other", model: "test-model", reasoning: "medium", accountId: "22222222-2222-4222-8222-222222222222" }).run();
+    const crossAccount = await patch(own.id, other.id);
+    expect({ status: crossAccount.status, body: await crossAccount.json() }).toMatchObject({ status: 409, body: { code: "cloudroom_other_account" } });
+
+    const notices = (id: string) => harness.db.select().from(cloudroomCommands).all().filter(row => row.threadId === id).map(row => JSON.parse(row.input).text);
+    harness.db.insert(cloudroomCommands).values({ id: `first_${own.id}`, threadId: own.id, command: "prompt", input: JSON.stringify({ text: "Start", parent_thread: cloudParent.id }), state: "completed", createdAt: 1 }).run();
+    await service.noticeCloudParent(own.id, "completed", "turn-2");
+    expect(notices(cloudParent.id)).toEqual([]);
+    expect((await patch(own.id, shared.id)).status).toBe(200);
+    await service.noticeCloudParent(own.id, "completed", "turn-3");
+    expect(notices(shared.id)).toEqual([expect.stringContaining(`Child thread ${own.id} completed`)]);
+  } finally { cloudroom(harness.deps).stop(); website.close(); await harness.cleanup(); }
 });
 
 it("keeps each queued follow-up's reasoning and rejects locked or conflicting changes", async () => {

@@ -1179,7 +1179,13 @@ export class TerminalSessionLifecycle {
         "Terminal session not found",
       );
     }
-    if (!isRunningBrowserTerminalSession(current)) {
+    const daemonSessionId =
+      current.status === "exited"
+        ? this.options.hub.getDaemonSessionIdForHost(current.hostId)
+        : isRunningBrowserTerminalSession(current)
+          ? current.daemonSessionId
+          : null;
+    if (daemonSessionId === null) {
       throw new ApiError(
         409,
         "terminal_output_unavailable",
@@ -1189,46 +1195,61 @@ export class TerminalSessionLifecycle {
 
     const requestId = randomUUID();
     const pendingReplayKey = terminalRpcKey(
-      current.daemonSessionId,
+      daemonSessionId,
       current.id,
       requestId,
     );
     const pendingReplay = this.pendingOutputReads.claim({
-      daemonSessionId: current.daemonSessionId,
+      daemonSessionId,
       requestId,
       rpcKey: pendingReplayKey,
       terminalId: current.id,
     }).promise;
-    const sent = this.options.hub.sendDaemonSessionMessage(
-      current.daemonSessionId,
-      {
-        type: "terminal.attach",
-        requestId,
-        terminalId: current.id,
-        sinceSeq: args.query.sinceSeq ?? 0,
-        tailBytes: args.query.tailBytes ?? TERMINAL_SCROLLBACK_MAX_BYTES,
-      },
-    );
+    const sent = this.options.hub.sendDaemonSessionMessage(daemonSessionId, {
+      type: "terminal.attach",
+      requestId,
+      terminalId: current.id,
+      sinceSeq: args.query.sinceSeq ?? 0,
+      tailBytes: args.query.tailBytes ?? TERMINAL_SCROLLBACK_MAX_BYTES,
+    });
     if (!sent) {
       this.pendingOutputReads.cancel(pendingReplayKey);
-      this.disconnectDaemonSessionTerminals({
-        daemonSessionId: current.daemonSessionId,
-      });
+      this.disconnectDaemonSessionTerminals({ daemonSessionId });
       throw new ApiError(502, "host_disconnected", "Host is not connected");
     }
 
     const requestedSinceSeq = args.query.sinceSeq ?? 0;
-    const replay = await pendingReplay;
+    const replay = await pendingReplay.catch((error: unknown) => {
+      if (
+        current.status === "exited" &&
+        error instanceof ApiError &&
+        error.body.code === "terminal_not_found"
+      ) {
+        throw new ApiError(
+          409,
+          "terminal_output_unavailable",
+          "Terminal output is no longer available because the session exited",
+        );
+      }
+      throw error;
+    });
     const bounded = applyTerminalOutputBounds({
       chunks: replay.chunks.map(toTerminalOutputChunk),
       query: args.query,
       replayNextSeq: replay.nextSeq,
       requestedSinceSeq,
     });
+    if (
+      current.status !== "exited" &&
+      getTerminalById(this.options.db, current.id)?.status === "exited"
+    ) {
+      return this.readTerminalOutput(args);
+    }
     return {
       chunks: bounded.chunks,
       nextSeq: replay.nextSeq,
       truncated: bounded.truncated,
+      ...(current.status === "exited" ? { exitCode: current.exitCode } : {}),
     };
   }
 
@@ -1471,11 +1492,6 @@ export class TerminalSessionLifecycle {
             session,
           });
           this.rejectPendingAttachesForTerminal({
-            terminalId: exited.id,
-            code: "terminal_exited",
-            message: "Terminal session exited",
-          });
-          this.rejectPendingOutputReadsForTerminal({
             terminalId: exited.id,
             code: "terminal_exited",
             message: "Terminal session exited",

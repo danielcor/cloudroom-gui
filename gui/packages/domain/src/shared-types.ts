@@ -206,6 +206,10 @@ export const promptInputSchema = z.discriminatedUnion("type", [
 ]);
 export type PromptInput = z.infer<typeof promptInputSchema>;
 
+/** Agents get only a file's path, so files can be large; images reach the model, so they stay small. */
+export const PROMPT_IMAGE_ATTACHMENT_LIMIT_BYTES = 10 * 1024 * 1024;
+export const PROMPT_FILE_ATTACHMENT_LIMIT_BYTES = 100 * 1024 * 1024;
+
 export function flattenPromptInputGroups(
   inputGroups: readonly PromptInput[][],
 ): PromptInput[] {

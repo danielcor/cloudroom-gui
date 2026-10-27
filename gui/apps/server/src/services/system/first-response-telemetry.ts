@@ -1,6 +1,6 @@
 import { cloudroomCommands, cloudroomThreads, events, threads, type DbConnection } from "@cloudroom/db";
 import type { ThreadEventType } from "@cloudroom/domain";
-import { and, desc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { NotificationHub } from "../../ws/hub.js";
 import type { TelemetryEvent, TelemetryExecution, TelemetryService } from "./telemetry.js";
 import type { SandboxDirectory } from "../cloudroom/sandboxes.js";
@@ -55,6 +55,7 @@ export function installFirstResponseTelemetry(
       const ms = Date.now() - sent.sentAt;
       if (ms > MAX_WAIT_MS) return;
       const startup = sent.execution === "cloud_sandbox" ? current.startupSince(message.id, sent.sentAt) : null;
+      const turn = sent.execution === "local" ? latestTurnExecution(current.db, message.id) : undefined;
       current.telemetry.capture({
         name: "first_response",
         properties: {
@@ -66,8 +67,8 @@ export function installFirstResponseTelemetry(
           sandbox_woke: sent.execution === "cloud_sandbox" ? current.wokeSince(message.id, sent.sentAt) : null,
           startup_source: startup?.startup_source ?? null,
           sandbox_start_ms: startup?.sandbox_start_ms ?? null,
-          model: sent.model ?? null,
-          reasoning_level: sent.reasoningLevel ?? null,
+          model: turn?.model ?? sent.model ?? null,
+          reasoning_level: turn?.reasoning ?? sent.reasoningLevel ?? null,
           service_tier: sent.serviceTier ?? null,
           harness_version: sent.provider === "codex" ? startup?.versions?.codex ?? null : sent.provider === "claude-code" ? startup?.versions?.claude ?? null : null,
           seconds_since_first_launch: secondsSinceFirstLaunch(),
@@ -116,6 +117,19 @@ export function noteMessageSent(
   }
   tracker.pending.set(threadId, { ...message, model: cloud?.model ?? local?.model ?? null, reasoningLevel: cloud?.reasoning ?? local?.reasoning ?? null,
     serviceTier, afterSequence: latest?.sequence ?? 0, sentAt });
+}
+
+function latestTurnExecution(db: DbConnection, threadId: string): { model: string | null; reasoning: string | null } | undefined {
+  return db
+    .select({
+      model: sql<string | null>`json_extract(${events.data}, '$.execution.model')`,
+      reasoning: sql<string | null>`json_extract(${events.data}, '$.execution.reasoningLevel')`,
+    })
+    .from(events)
+    .where(and(eq(events.threadId, threadId), eq(events.type, "client/turn/requested")))
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .get();
 }
 
 function hasOutputAfter(db: DbConnection, threadId: string, afterSequence: number): boolean {

@@ -23,6 +23,8 @@ import { openCloudPty } from "./cloud-pty.js";
 
 const DEFAULT_SCROLLBACK_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_SCROLLBACK_MAX_CHUNKS = 10_000;
+const MAX_EXITED_TERMINAL_OUTPUTS = 20;
+const EXITED_TERMINAL_OUTPUT_TTL_MS = 15 * 60 * 1000;
 const MAX_OUTPUT_CHUNK_BYTES = 64 * 1024;
 const DEFAULT_OUTPUT_BATCH_DELAY_MS = 4;
 const DEFAULT_TERMINAL_CLOSE_GRACE_PERIOD_MS = 2_000;
@@ -467,6 +469,10 @@ export class TerminalManager {
   private readonly terminalOperations = new Map<string, Promise<void>>();
   private readonly openingTerminalIds = new Set<string>();
   private readonly sessions = new Map<string, TerminalSession>();
+  private readonly exitedOutputs = new Map<
+    string,
+    Pick<TerminalSession, "nextSeq" | "scrollback">
+  >();
 
   constructor(private readonly options: TerminalManagerOptions) {
     this.closeGracePeriodMs =
@@ -697,7 +703,11 @@ export class TerminalManager {
 
   private attachTerminal(message: TerminalAttachMessage): void {
     const session = this.sessions.get(message.terminalId);
-    if (!session) {
+    if (session) {
+      this.flushTerminalOutput(session);
+    }
+    const output = session ?? this.exitedOutputs.get(message.terminalId);
+    if (!output) {
       this.sendTerminalError({
         code: "terminal_not_found",
         message: "Terminal session is not open",
@@ -707,8 +717,7 @@ export class TerminalManager {
       return;
     }
 
-    this.flushTerminalOutput(session);
-    const replayEntries = session.scrollback.filter(
+    const replayEntries = output.scrollback.filter(
       (entry) => entry.chunk.seq >= message.sinceSeq,
     );
     let replayBytes = replayEntries.reduce(
@@ -727,8 +736,8 @@ export class TerminalManager {
       requestId: message.requestId,
       terminalId: message.terminalId,
       chunks,
-      replayStartSeq: chunks[0]?.seq ?? session.nextSeq,
-      nextSeq: session.nextSeq,
+      replayStartSeq: chunks[0]?.seq ?? output.nextSeq,
+      nextSeq: output.nextSeq,
     });
   }
 
@@ -942,6 +951,21 @@ export class TerminalManager {
     }
   }
 
+  private retainExitedOutput(session: TerminalSession): void {
+    const { nextSeq, scrollback, terminalId } = session;
+    this.exitedOutputs.set(terminalId, { nextSeq, scrollback });
+    setTimeout(
+      () => this.exitedOutputs.delete(terminalId),
+      EXITED_TERMINAL_OUTPUT_TTL_MS,
+    ).unref();
+    for (const oldestId of this.exitedOutputs.keys()) {
+      if (this.exitedOutputs.size <= MAX_EXITED_TERMINAL_OUTPUTS) {
+        return;
+      }
+      this.exitedOutputs.delete(oldestId);
+    }
+  }
+
   private finishTerminalSession(args: FinishTerminalSessionArgs): void {
     if (this.sessions.get(args.session.terminalId) !== args.session) {
       return;
@@ -959,6 +983,9 @@ export class TerminalManager {
       args.session.closeTimeout = null;
     }
     this.sessions.delete(args.session.terminalId);
+    if (args.closeReason === "process-exit") {
+      this.retainExitedOutput(args.session);
+    }
     if (args.session.environmentId !== null) {
       this.options.runtimeManager.markTerminalInactive(
         args.session.environmentId,

@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 126
+
+Cloud threads ready before you click (2026-10-26)
+
+### Changes
+
+- On paid plans, the Cloud threads you can see in the sidebar start waking up before you click them.
+- The app stays smooth when many Cloud subagents start at once.
+- Attachments can be up to 100 MB, and HEIC photos are turned into JPEGs.
+- Terminal output stays readable after the command exits.
+- If a Local thread fails to set up, your first prompt is kept for the retry.
+- Teleporting several threads at once no longer mixes up their sandboxes.
+- Security fixes.
+
 ## 125
 
 One-click security scans (2026-10-26)

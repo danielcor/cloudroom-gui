@@ -367,19 +367,23 @@ class CloudroomService {
   private readonly heldStarts = new Set<string>();
   childTurnEnded?: (child: Thread & { parentThreadId: string }, status: ThreadEventTurnStatus) => void;
   moveRequest?: (threadId: string, project: string) => void;
-  teleportUrl = "";
+  // Kept per thread: teleports run at the same time, and one shared value gave threads each other's sandboxes.
+  private readonly teleportUrls = new Map<string, string>();
+  /** The core a thread's teleport picked, saved as its binding. */
+  teleportUrl(threadId: string): string { return this.teleportUrls.get(threadId) ?? ""; }
   async teleportClient(threadId?: string): Promise<CloudroomClient> {
     const existing = threadId ? binding(this.deps.db, threadId) : null;
     const sandbox = existing ? sandboxThread(existing.coreUrl) : threadId && await this.newThreadsInSandboxes() ? threadId : null;
     if (sandbox) {
       // Teleported threads get their own sandbox too; this wakes it for the transfer.
-      this.teleportUrl = SANDBOX_PREFIX + sandbox;
-      return this.client({ coreUrl: this.teleportUrl } as Binding);
+      const coreUrl = SANDBOX_PREFIX + sandbox;
+      if (threadId) this.teleportUrls.set(threadId, coreUrl);
+      return this.client({ coreUrl } as Binding);
     }
     const connection = await this.connection();
     const saved = threadId ? binding(this.deps.db, threadId) : null;
     if (saved && saved.coreUrl !== connection.url) throw new ApiError(409, "cloudroom_connection_changed", "Restore this transfer's original cloud connection before continuing.");
-    this.teleportUrl = connection.url;
+    if (threadId) this.teleportUrls.set(threadId, connection.url);
     return new CloudroomClient(connection);
   }
   async threadClient(threadId: string, wake = true): Promise<CloudroomClient> {
@@ -388,14 +392,20 @@ class CloudroomService {
     return this.client(saved, wake);
   }
   followTeleport(threadId: string): void { void this.deliver(threadId).catch(() => {}); }
-  private readonly leftParent = new Set<string>();
-  /** A top-level thread in another thread's sandbox was a child there. Before its next work, Core stops reporting it
-   *  to that former parent, which may be archived. Repeats are harmless, so a failure retries on the next delivery. */
+  private readonly leftParent = new Map<string, number | string>();
+  /** A top-level thread in another thread's sandbox was a child there. As soon as that sandbox is awake, Core stops
+   *  reporting it to that former parent, which may be archived. Repeats are harmless, so a failure retries a minute
+   *  later or before its next work. Once Core detaches the session, or answers that it has no such session (a stale
+   *  sandbox address answers 404 too, without saying so), that session is done. */
   private async leaveFormerParent(saved: Binding, client: CloudroomClient): Promise<void> {
     const sandbox = sandboxThread(saved.coreUrl);
-    if (!saved.sessionId || !sandbox || sandbox === saved.threadId || this.leftParent.has(saved.threadId) || getThread(this.deps.db, saved.threadId)?.parentThreadId) return;
-    try { await client.detach(saved.sessionId); this.leftParent.add(saved.threadId); }
-    catch (error) { this.warn("A Cloud thread could not leave its former parent", error, { threadId: saved.threadId }); }
+    const mark = this.leftParent.get(saved.threadId) ?? 0;
+    if (!saved.sessionId || !sandbox || sandbox === saved.threadId || mark === saved.sessionId || (typeof mark === "number" && mark > Date.now() && !commands(this.deps.db, saved.threadId).some(c => c.state === "sending")) || getThread(this.deps.db, saved.threadId)?.parentThreadId) return;
+    try { await client.detach(saved.sessionId); this.leftParent.set(saved.threadId, saved.sessionId); }
+    catch (error) {
+      this.leftParent.set(saved.threadId, error instanceof CloudroomError && error.status === 404 && error.message.endsWith(": session not found") ? saved.sessionId : Date.now() + 60_000);
+      this.warn("A Cloud thread could not leave its former parent", error, { threadId: saved.threadId });
+    }
   }
   detach(threadId: string): void {
     this.streams.get(threadId)?.abort();
@@ -408,6 +418,7 @@ class CloudroomService {
   private readonly streams = new Map<string, AbortController>();
   private readonly streamErrors = new Map<string, string>();
   private readonly connectionIssues = new Map<string, Partial<Record<ConnectionPhase, ConnectionIssue>>>();
+  private readonly sentQueues = new Map<string, string>();
   /** Threads whose cloud disk is full or low, from Core's storage records. The composer shows one live card for it. */
   private readonly disk = new Map<string, { paused: boolean; reason: "disk_capacity" | "measurement_unavailable"; usedBytes: number | null; totalBytes: number | null }>();
   private readonly deliveries = new Map<string, Promise<void>>();
@@ -455,19 +466,55 @@ class CloudroomService {
   }
 
   private readonly labels = new Map<string, string>();
+  private readonly labelSaves = new Map<string, Promise<void>>();
   /** Keeps the website's copy of a sandbox thread's title, project name, harness, model, Core session, and parent
    *  current, so the web can list it and read its history, and the thread that started it can too (ADR 0182, 0239,
-   *  0256). Subagents sharing their parent's sandbox are found through its history. */
+   *  0256). Subagents sharing their parent's sandbox are found through its history. A thread's saves run one at a
+   *  time, so an older label can't land after a newer one. The website routes the thread's turn reports, and its
+   *  parent's tell, stop and archive, by the label's parent (ADR 0259), so `changeParent` saves a new parent there
+   *  first, then runs `apply` (the Mac's change), then saves the parent the Mac ended up with: a no-op unless the
+   *  change failed. Nothing changes if the first save fails. */
   private syncLabel(threadId: string): void {
+    void this.oneLabelSave(threadId, () => this.saveLabel(threadId)).catch((error: unknown) => this.warn("Cloud thread label not saved", error, { threadId }));
+  }
+
+  private oneLabelSave<T>(threadId: string, save: () => Promise<T>): Promise<T> {
+    const result = (this.labelSaves.get(threadId) ?? Promise.resolve()).then(save);
+    const settled = result.then(() => {}, () => {});
+    this.labelSaves.set(threadId, settled);
+    void settled.then(() => { if (this.labelSaves.get(threadId) === settled) this.labelSaves.delete(threadId); });
+    return result;
+  }
+
+  private async saveLabel(threadId: string, parent?: string | null): Promise<boolean | null> {
     const saved = binding(this.deps.db, threadId), thread = getThread(this.deps.db, threadId);
-    if (!saved?.sessionId || !thread || sandboxThread(saved.coreUrl) !== threadId) return;
-    const label = { title: thread.title ?? thread.titleFallback ?? null, project_name: getProject(this.deps.db, thread.projectId)?.name ?? null, project: thread.projectId, session: saved.sessionId, harness: thread.providerId, model: thread.modelOverride ?? saved.model, parent: thread.parentThreadId ?? null };
+    if (!saved?.sessionId || !thread || sandboxThread(saved.coreUrl) !== threadId) return null;
+    const label = { title: thread.title ?? thread.titleFallback ?? null, project_name: getProject(this.deps.db, thread.projectId)?.name ?? null, project: thread.projectId, session: saved.sessionId, harness: thread.providerId, model: thread.modelOverride ?? saved.model, parent: parent === undefined ? thread.parentThreadId ?? null : parent };
     const key = JSON.stringify(label);
-    if (this.labels.get(threadId) === key) return;
+    if (this.labels.get(threadId) === key) return null;
+    this.labels.delete(threadId);
+    const stored = await this.sandboxes.label(threadId, label);
     this.labels.set(threadId, key);
-    void this.sandboxes.label(threadId, label).catch((error: unknown) => {
-      this.labels.delete(threadId);
-      this.warn("Cloud thread label not saved", error, { threadId });
+    return stored;
+  }
+
+  async changeParent(threadId: string, parent: string | null, apply: () => Promise<void>): Promise<void> {
+    await this.oneLabelSave(threadId, async () => {
+      const saved = binding(this.deps.db, threadId);
+      if (saved && sandboxThread(saved.coreUrl) === threadId && !saved.sessionId) throw new ApiError(503, "cloudroom_parent_unsaved", "This Cloud thread is still starting. Change its parent once it has started.");
+      try {
+        if (await this.saveLabel(threadId, parent) === false) {
+          this.labels.delete(threadId);
+          throw new CloudroomError("Cloud has no record of this thread's sandbox yet");
+        }
+      } catch (error) {
+        this.warn("A Cloud thread's new parent was not saved", error, { threadId });
+        const signIn = error instanceof CloudroomError && (error.status === 401 || error.status === 403);
+        if (error instanceof CloudroomError && !error.retryable && error.status !== null && !signIn) throw new ApiError(400, "cloudroom_parent_unsaved", publicError(error));
+        throw new ApiError(503, "cloudroom_parent_unsaved", `Couldn't save the new parent to Cloud: ${(signIn ? "Sign in to Cloudroom to use cloud sandboxes" : publicError(error)).replace(/\.?$/, ".")} Try again.`);
+      }
+      try { await apply(); }
+      finally { await this.saveLabel(threadId).catch((error: unknown) => this.warn("Cloud thread label not saved", error, { threadId })); }
     });
   }
 
@@ -615,11 +662,7 @@ class CloudroomService {
     if (saved) await this.requireOwnThread(saved);
     const sandbox = saved ? sandboxThread(saved.coreUrl) : null;
     if (sandbox) {
-      if (wake) {
-        void this.uploadMacConfig();
-        const logins = this.syncLogins();
-        if (!this.sandboxes.loginsCopied) await logins;
-      }
+      if (wake) await this.beforeWake();
       const project = this.sandboxProject(getThread(this.deps.db, sandbox)?.projectId);
       // A sandbox archived while one of its threads is active (a missed or racing restore) comes back for it.
       const found = await this.sandboxes.connection(sandbox, project, wake, trigger).catch(async (error: unknown) => {
@@ -648,7 +691,13 @@ class CloudroomService {
     return Boolean(saved.accountId) && saved.accountId !== (await this.savedConnection())?.account?.id;
   }
 
-  private async requireOwnThread(saved: Binding): Promise<void> {
+  private async beforeWake(): Promise<void> {
+    void this.uploadMacConfig();
+    const logins = this.syncLogins();
+    if (!this.sandboxes.loginsCopied) await logins;
+  }
+
+  async requireOwnThread(saved: Binding): Promise<void> {
     if (await this.otherAccountThread(saved)) throw new ApiError(409, "cloudroom_other_account", "This cloud thread belongs to another Cloudroom account. Sign in with that account to use it.");
   }
 
@@ -1155,6 +1204,18 @@ class CloudroomService {
     const thread = getThread(this.deps.db, threadId);
     if (!saved?.sessionId || !sandboxThread(saved.coreUrl) || !thread || thread.archivedAt || thread.deletedAt) return;
     await this.client(saved, true, trigger);
+  }
+
+  async preload(threadIds: string[]): Promise<void> {
+    const due = new Map<string, SandboxProject>();
+    for (const threadId of threadIds) {
+      const saved = binding(this.deps.db, threadId);
+      const thread = getThread(this.deps.db, threadId);
+      const sandbox = saved?.sessionId ? sandboxThread(saved.coreUrl) : null;
+      if (!saved || !sandbox || due.has(sandbox) || !thread || thread.archivedAt || thread.deletedAt || await this.otherAccountThread(saved)) continue;
+      due.set(sandbox, this.sandboxProject(getThread(this.deps.db, sandbox)?.projectId));
+    }
+    if (due.size) await this.sandboxes.preload([...due].map(([thread, project]) => ({ thread, project })), () => this.beforeWake());
   }
 
   async updateReasoningOverride(thread: Thread, reasoningLevel: ReasoningLevel | null): Promise<void> {
@@ -1980,7 +2041,7 @@ class CloudroomService {
       appendStartProgress(tx, threadId, [{ key: "error", text: message, status: "failed" }], "failed");
     });
     this.notify(threadId, ["system/thread-provisioning"]);
-    this.noticeCloudParent(threadId, "not_started", "start", message);
+    void this.noticeCloudParent(threadId, "not_started", "start", message).catch((error: unknown) => this.warn("A child report could not be sent", error, { threadId }));
   }
 
   private progress(threadId: string, steps: StartStep[], block?: "completed" | "failed"): void {
@@ -2099,8 +2160,8 @@ class CloudroomService {
       if (epoch !== this.epoch) return;
       if (saved.sessionId) {
         this.follow(saved, client);
-        if (!commands(this.deps.db, threadId).some(c => c.state === "sending")) { this.setConnectionIssue(threadId, "delivery"); return; }
         await this.leaveFormerParent(saved, client);
+        if (!commands(this.deps.db, threadId).some(c => c.state === "sending")) { this.setConnectionIssue(threadId, "delivery"); return; }
       }
       const sandbox = sandboxThread(saved.coreUrl);
       const known = sandbox ? await this.savedCapabilities() : null;
@@ -2403,16 +2464,20 @@ class CloudroomService {
         for (;;) {
           const reports = Object.entries(await this.records(CHILD_REPORTS, childReportSchema));
           if (!reports.length || this.stopped) return;
-          let waiting = false;
+          let waiting = false, failed = false;
           for (const [key, report] of reports) {
             const thread = getThread(this.deps.db, report.child);
             const parent = this.reportedParent(thread);
             if (parent && teleportBlocked(this.deps.db, parent.id)) { waiting = true; continue; }
             const status = report.status as ThreadEventTurnStatus;
-            if (parent && isCloudThread(parent)) this.noticeCloudParent(report.child, status, report.turn);
+            if (parent && isCloudThread(parent)) {
+              const sent = await this.noticeCloudParent(report.child, status, report.turn).then(() => true, (error: unknown) => { this.warn("A child report could not be sent", error, { threadId: report.child }); return false; });
+              if (!sent) { failed = true; continue; }
+            }
             else if (parent && thread?.parentThreadId) this.childTurnEnded?.({ ...thread, parentThreadId: thread.parentThreadId }, status);
             await this.updateRecords(CHILD_REPORTS, childReportSchema, ({ [key]: _done, ...rest }) => rest);
           }
+          if (failed && !waiting) return;
           if (waiting) await new Promise((resolve) => setTimeout(resolve, 2000));
         }
       } finally { this.delivering = undefined; }
@@ -2422,13 +2487,17 @@ class CloudroomService {
 
   /** Reports a child in a sandbox of its own to its Cloud parent, in the words of Core's own child notices, so the
    *  app shows it as a child report. Called before the child's record counts as read, so a crash can't lose it.
-   *  Only for children on Cores older than ADR 0259; newer ones report through the website, Mac on or off. */
-  private noticeCloudParent(threadId: string, status: ThreadEventTurnStatus | "not_started", turn: string, cause?: string): void {
+   *  Core reports a child a Cloud parent started through the website instead (ADR 0259), Mac on or off, when its
+   *  current parent has a sandbox of its own; this covers every other child.
+   *  A parent in another Cloudroom account never hears from it. */
+  private async noticeCloudParent(threadId: string, status: ThreadEventTurnStatus | "not_started", turn: string, cause?: string): Promise<void> {
     const child = getThread(this.deps.db, threadId);
     const parent = this.reportedParent(child);
     if (!child || !parent || !isCloudThread(parent)) return;
+    const parentSaved = binding(this.deps.db, parent.id);
+    if (parentSaved && await this.otherAccountThread(parentSaved)) return;
     const first = command(this.deps.db, `first_${child.id}`);
-    if (status !== "not_started" && first && JSON.parse(first.input).parent_thread) return;
+    if (status !== "not_started" && first && JSON.parse(first.input).parent_thread && parentSaved?.coreUrl === SANDBOX_PREFIX + parent.id) return;
     const name = child.title ? `"${child.title}" (${child.id})` : child.id;
     const reply = getLastThreadOutput(this.deps.db, child.id)?.trim();
     const text = status === "completed"
@@ -2663,7 +2732,7 @@ class CloudroomService {
           const move = fresh && record.kind === "move" && z.object({ project: z.string().min(1) }).safeParse(record.data);
           const ended = fresh ? endedTurn(record) : null;
           const turn = ended ? z.object({ request_id: z.string() }).catch({ request_id: String(record.sequence) }).parse(record.data).request_id : "";
-          if (ended) this.noticeCloudParent(saved.threadId, ended, turn);
+          if (ended) await this.noticeCloudParent(saved.threadId, ended, turn);
           const held = ended && this.teleportingParent(saved.threadId) ? ended : null;
           if (held) await this.holdChildReport(saved.threadId, held, turn);
           const eventTypes = projectRecord(this.deps.db, saved.threadId, record, outage);
@@ -2857,18 +2926,27 @@ class CloudroomService {
     this.notify(threadId);
   }
 
+  // Status patches one sidebar row. Queue and list refreshes go out only when the queue really changed.
   private notify(threadId: string, eventTypes: ThreadEventType[] = [], stateChanged = true): void {
     const thread = getThread(this.deps.db, threadId);
     if (!thread) return;
     const changes: ThreadChangeKind[] = [
       ...(eventTypes.length ? ["events-appended" as const] : []),
-      ...(stateChanged ? ["status-changed" as const, "queue-changed" as const] : []),
+      ...(stateChanged ? ["status-changed" as const] : []),
+      ...(stateChanged && this.queueChanged(threadId) ? ["queue-changed" as const] : []),
     ];
     if (!changes.length) return;
     this.deps.hub.notifyThread(threadId, changes, {
       ...(stateChanged ? buildThreadStatusChangeMetadata(this.deps, thread) : {}),
       ...(eventTypes.length ? { eventTypes } : {}),
     });
-    if (stateChanged) this.deps.hub.notifyProject(thread.projectId, ["threads-changed"]);
+  }
+
+  private queueChanged(threadId: string): boolean {
+    let queue: string;
+    try { queue = JSON.stringify(this.queue(threadId)); } catch { return true; }
+    if (this.sentQueues.get(threadId) === queue) return false;
+    this.sentQueues.set(threadId, queue);
+    return true;
   }
 }

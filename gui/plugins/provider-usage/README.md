@@ -13,9 +13,9 @@ Failed refreshes retain the last available measurements with a retry notice.
 Account authentication failures and plans without reported limits have separate
 states; unavailable usage is never represented as zero consumption.
 
-Settings → Agents → Usage contains the usage page, using its
-full-size provider groups with email-labeled accounts and fetching only resources in the selected pool or machine. Both surfaces share the plugin’s aggregation and cache. Neither display is required for source
-plugins to publish their usage.
+Settings → Agents → Usage shows the same card at a larger size, between the
+Cloudroom plan meters and a "what uses credits" price list: only agents actively
+running use credits, and 18 other things are free.
 
 Use `bb plugin rpc list --method provider-usage.v1.listResources --json` to find sources
 and `bb plugin rpc inspect <plugin-id> provider-usage.v1.listResources --json`

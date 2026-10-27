@@ -47,6 +47,8 @@ export const threadProvisionCommonPayloadSchema = z.object({
   inputGroups: z.array(z.array(promptInputSchema).min(1)).min(1).optional(),
   titleProvided: z.boolean(),
   seedWithoutRun: z.boolean().default(false),
+  inputCancelled: z.literal(true).optional(),
+  carryInput: z.literal(true).optional(),
 });
 
 export type ThreadForkDescriptor = z.infer<typeof threadForkDescriptorSchema>;
@@ -185,6 +187,24 @@ function persistThreadProvisionContext(
   );
 }
 
+export function cancelInterruptedThreadStartInput(
+  db: DbConnection,
+  threadId: string,
+): void {
+  db.update(threads)
+    .set({
+      startupContext: sql`json_set(${threads.startupContext}, '$.request.inputCancelled', json('true'))`,
+    })
+    .where(
+      and(
+        eq(threads.id, threadId),
+        eq(threads.status, "error"),
+        sql`json_extract(${threads.startupContext}, '$.kind') = 'provisioning'`,
+      ),
+    )
+    .run();
+}
+
 export function readThreadStartupContextOfKind<T>(
   db: DbConnection | DbTransaction,
   threadId: string,
@@ -217,7 +237,10 @@ export function createThreadStartup(
   request: ThreadProvisionContext["request"],
 ): ThreadProvisionContext {
   return {
-    request: threadProvisionCommonPayloadSchema.parse(request),
+    request: threadProvisionCommonPayloadSchema.parse({
+      ...request,
+      carryInput: true,
+    }),
     state: {
       environmentId: null,
       provisioningId: createThreadProvisioningId(),

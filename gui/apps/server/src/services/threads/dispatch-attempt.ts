@@ -5,11 +5,14 @@ import {
 } from "../machines/lifecycle.js";
 import {
   deleteClaimedQueuedThreadMessageInTransaction,
+  deleteQueuedThreadRetries,
   getEnvironment,
   getThread,
   isThreadQueueAutoSendPaused,
   listRunningThreads,
   type ClaimedQueuedThreadMessageRow,
+  type DbTransaction,
+  type QueuedThreadMessageRow,
   type RunningThreadRow,
 } from "@cloudroom/db";
 import {
@@ -88,6 +91,9 @@ import {
 import type { TurnRequestRetryMarker } from "./thread-events.js";
 import { restoreInterruptedThreadStartupRequest } from "./thread-provisioning.js";
 import { isHardQueueHeld } from "./thread-parent.js";
+import { resolveDeferredFirstTurnContext } from "./deferred-first-turn-context.js";
+import { emitPluginMessageCancelled } from "../plugins/plugin-thread-events.js";
+import { NotificationBuffer } from "../lib/notification-buffer.js";
 
 export const pendingThreadStartContextSchema = z.object({
   environmentIntent: threadProvisionEnvironmentIntentSchema,
@@ -504,6 +510,7 @@ async function runDispatchAttempt(
       admitted.value = await admitPendingThread(deps, {
         claimed,
         payload: resolvedPayload,
+        isRetry: args.retryOf !== undefined,
         respectManualStopPause,
         beforeDispatch: args.beforeDispatch,
         startContext: args.startContext ?? retryStartContext,
@@ -683,6 +690,7 @@ function consumeClaimedRow(
 
 interface AdmitPendingThreadArgs {
   claimed: ClaimedQueuedThreadMessageRow | null;
+  isRetry: boolean;
   payload: SendMessageRequest & { inputGroups?: PromptInput[][] };
   respectManualStopPause: boolean;
   beforeDispatch: (() => void) | undefined;
@@ -743,8 +751,10 @@ async function admitPendingThread(
     threadId: args.thread.id,
   });
   let startingThread: Thread;
+  let cancelledRetries: QueuedThreadMessageRow[];
+  const notifications = new NotificationBuffer();
   try {
-    startingThread = deps.db.transaction(
+    [startingThread, cancelledRetries] = deps.db.transaction(
       (tx) => {
         // The row is consumed and the thread flipped in ONE transaction: a
         // flip that loses to a concurrent attempt rolls the consumption back,
@@ -758,6 +768,9 @@ async function admitPendingThread(
             args.respectManualStopPause,
           )({ tx });
         }
+        const undelivered = args.isRetry
+          ? []
+          : undeliveredStartInput(tx, args.thread.id);
         const prepared = applyLoggedThreadLifecycleEventInTransaction(
           { db: tx, logger: deps.logger },
           { threadId: args.thread.id, event: { type: "run.preparing" } },
@@ -772,7 +785,7 @@ async function admitPendingThread(
           environmentIntent: startContext.environmentIntent,
           execution,
           fork: startContext.fork,
-          input: args.payload.input,
+          input: [...undelivered, ...args.payload.input],
           ...(startContext.providerInput === undefined
             ? {}
             : { providerInput: startContext.providerInput }),
@@ -780,7 +793,12 @@ async function admitPendingThread(
           startedOnBehalfOf: startContext.startedOnBehalfOf,
           titleProvided: startContext.titleProvided,
         });
-        return starting;
+        return [
+          starting,
+          undelivered.length > 0
+            ? deleteQueuedThreadRetries(tx, notifications, starting.id)
+            : [],
+        ] as const;
       },
       { behavior: "immediate" },
     );
@@ -796,6 +814,10 @@ async function admitPendingThread(
     );
     return null;
   }
+  notifications.flushInto(deps.hub);
+  for (const row of cancelledRetries) {
+    emitPluginMessageCancelled(toThreadQueuedMessage(row));
+  }
   deps.hub.notifyThread(
     startingThread.id,
     ["status-changed"],
@@ -805,6 +827,35 @@ async function admitPendingThread(
     claimedRow: args.claimed,
     startingThread,
   };
+}
+
+const UNDELIVERED_START_NOTE =
+  "Cloudroom: workspace setup failed before the messages below reached you. They came first; the user's newest message follows and may repeat them.";
+
+function undeliveredStartInput(
+  tx: DbTransaction,
+  threadId: string,
+): PromptInput[] {
+  if (getThread(tx, threadId)?.status !== "error") return [];
+  const request = readThreadProvisionContext(tx, threadId)?.request;
+  if (request?.carryInput !== true || request.inputCancelled) return [];
+  const input = (
+    request.input.length > 0
+      ? request.input
+      : (resolveDeferredFirstTurnContext(tx, threadId)?.input ?? [])
+  ).filter(
+    (block) => block.type !== "text" || block.text !== UNDELIVERED_START_NOTE,
+  );
+  if (input.length === 0) return [];
+  const note: PromptInput = {
+    type: "text",
+    text: UNDELIVERED_START_NOTE,
+    mentions: [],
+  };
+  return [note, ...input].map((block) => ({
+    ...block,
+    visibility: "agent-only" as const,
+  }));
 }
 
 async function launchAdmittedThread(

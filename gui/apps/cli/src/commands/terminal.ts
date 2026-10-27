@@ -680,7 +680,7 @@ async function waitForTerminal(args: {
       terminalId: args.terminalId,
       query: { limitChunks: 1, tailBytes: 1 },
     });
-    nextSeq = currentOutput.nextSeq;
+    nextSeq = currentOutput.exitCode === undefined ? currentOutput.nextSeq : 0;
   }
 
   while (Date.now() <= deadline) {
@@ -723,6 +723,9 @@ async function waitForTerminal(args: {
         terminalId: args.terminalId,
       };
     }
+    if (output.exitCode !== undefined) {
+      throw terminalExitedBeforeMatchError(args.terminalId);
+    }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
   throw new CliExitError(
@@ -743,13 +746,17 @@ async function readTerminalOutputForWait(args: {
     })
     .catch((error: unknown) => {
       if (isTerminalOutputUnavailable(error)) {
-        throw new CliExitError(
-          `Terminal ${args.terminalId} exited before the requested output matched`,
-          TERMINAL_WAIT_TIMEOUT_EXIT_CODE,
-        );
+        throw terminalExitedBeforeMatchError(args.terminalId);
       }
       throw error;
     });
+}
+
+function terminalExitedBeforeMatchError(terminalId: string): CliExitError {
+  return new CliExitError(
+    `Terminal ${terminalId} exited before the requested output matched`,
+    TERMINAL_WAIT_TIMEOUT_EXIT_CODE,
+  );
 }
 
 function isTerminalOutputUnavailable(error: unknown): boolean {

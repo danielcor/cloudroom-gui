@@ -70,9 +70,9 @@ Attachments:
   its relative `path` to thread --file/--image input. Thread --file and --image
   upload absolute paths and file: URLs from the CLI machine automatically;
   relative values remain existing server attachment paths.
-  image/* uploads are limited to 10MB; other files are limited to 25MB.
-  image/heic and image/heif uploads are rejected because no renderer or
-  provider can decode them; convert them to JPEG or PNG first.
+  image/* uploads are limited to 10MB; other files are limited to 100MB.
+  image/heic and image/heif uploads become JPEG on macOS, because no
+  renderer or provider can decode them. Elsewhere they are rejected.
 
 Sources:
 

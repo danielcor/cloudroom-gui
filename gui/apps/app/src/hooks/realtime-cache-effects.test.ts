@@ -1025,6 +1025,8 @@ describe("createRealtimeCacheEffects", () => {
       await vi.advanceTimersByTimeAsync(50);
     }
 
+    expect(activeListQueryFn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(activeListQueryFn).toHaveBeenCalledTimes(2);
     expect(archivedListQueryFn).not.toHaveBeenCalled();
     expect(globalArchivedListQueryFn).not.toHaveBeenCalled();
@@ -2563,7 +2565,7 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
-  it("restarts a sidebar fetch already in flight so its stale snapshot cannot overwrite the patched status", async () => {
+  it("keeps the patched status when a sidebar fetch already in flight returns a stale snapshot", async () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const sidebarNavigationKey = sidebarNavigationQueryKey();
@@ -2643,9 +2645,8 @@ describe("createRealtimeCacheEffects", () => {
     });
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(sidebarQueryFn).toHaveBeenCalledTimes(3);
+    expect(sidebarQueryFn).toHaveBeenCalledTimes(2);
     staleResponse?.resolve();
-    responses.shift()?.resolve();
     await vi.advanceTimersByTimeAsync(0);
 
     expect(

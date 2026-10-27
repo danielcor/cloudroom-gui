@@ -3,8 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { environments } from "@cloudroom/db";
+import { threadSchema, type Thread } from "@cloudroom/domain";
 import { createDeferredPromise } from "@cloudroom/test-helpers";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { hasLiveThreadStartInFlight } from "../../../../apps/server/src/services/threads/thread-lifecycle.js";
 import {
   createHostThread,
@@ -12,13 +13,15 @@ import {
   getThreadEvents,
   getThreadOutput,
   sendTextMessage,
+  stopThread,
 } from "../../helpers/api.js";
 import {
   waitForEnvironmentStatus,
   waitForThreadStatus,
 } from "../../helpers/assertions.js";
 import { createReadyReuseThread } from "../../helpers/fixtures.js";
-import { withHarness } from "../../helpers/harness.js";
+import { withHarness, type IntegrationHarness } from "../../helpers/harness.js";
+import { recordScriptedEchoRequests } from "../../helpers/scripted-echo.js";
 import {
   createProjectFixture,
   createReadyThread,
@@ -38,6 +41,47 @@ async function visibleProvisioningStatuses(
       : [],
   );
 }
+
+type MissingWorkspace = { type: "unmanaged"; path: string };
+
+async function failSetup(
+  harness: IntegrationHarness,
+  create?: (projectId: string, workspace: MissingWorkspace) => Promise<Thread>,
+) {
+  const record = await recordScriptedEchoRequests();
+  onTestFinished(() => record.dispose());
+  const project = await createProjectFixture(harness, "Setup Failure");
+  const dir = path.join(
+    path.dirname(harness.repoDir),
+    `missing-${randomUUID()}`,
+  );
+  onTestFinished(() => fs.rm(dir, { recursive: true, force: true }));
+  const workspace: MissingWorkspace = { type: "unmanaged", path: dir };
+  const options = { hostId: harness.hostId, projectId: project.id, workspace };
+  const { id } = await (create?.(project.id, workspace) ??
+    createHostThread(harness.api, options));
+  const wait = (status: "error" | "idle") =>
+    waitForThreadStatus(harness.api, id, status, TURN_TIMEOUT_MS);
+  await wait("error");
+  return {
+    id,
+    wait,
+    fixSetup: () => fs.mkdir(dir),
+    send: async (text: string, status: "error" | "idle") => {
+      await sendTextMessage(harness.api, id, { text });
+      await wait(status);
+    },
+    turnInputs: async () =>
+      (await record.read()).flatMap((request) =>
+        request.method === "turn/start" && request.params?.threadId === id
+          ? [request.params.input]
+          : [],
+      ),
+  };
+}
+
+const hidden = (text: string) => ({ text, visibility: "agent-only" as const });
+const note = hidden(expect.stringContaining("workspace setup failed"));
 
 describe.sequential("fake provider smoke reuse integration", () => {
   it("moves a thread to error and records failure events when environment provisioning fails", () =>
@@ -83,6 +127,74 @@ describe.sequential("fake provider smoke reuse integration", () => {
             event.data.code === "thread_provisioning_failed",
         ),
       ).toBe(true);
+    }));
+
+  it("drops a stopped prompt, and keeps later failed ones through a retry", () =>
+    withHarness(async (harness) => {
+      const thread = await failSetup(harness);
+      await stopThread(harness.api, thread.id);
+      await thread.send("first", "error");
+      await thread.send("second", "error");
+      await thread.fixSetup();
+      await harness.api.threads[":id"].retry.$post({
+        param: { id: thread.id },
+        json: { turnRequestId: null, sendAt: null, reason: "Retry" },
+      });
+      await thread.wait("idle");
+      expect(await thread.turnInputs()).toMatchObject([
+        [note, hidden("first"), hidden("second")],
+      ]);
+    }));
+
+  it("cancels a scheduled retry once a follow-up carries its prompt", () =>
+    withHarness(async (harness) => {
+      const thread = await failSetup(harness);
+      const sendAt = Date.now() + 60_000;
+      await harness.api.threads[":id"].retry.$post({
+        param: { id: thread.id },
+        json: { turnRequestId: null, sendAt, reason: "Retry" },
+      });
+      await thread.fixSetup();
+      await thread.send("continue", "idle");
+      const queue = await harness.api.threads[":id"]["queued-messages"].$get({
+        param: { id: thread.id },
+      });
+      expect(await queue.json()).toEqual([]);
+      expect(await thread.turnInputs()).toMatchObject([
+        [
+          note,
+          hidden("Reply with exactly READY and nothing else."),
+          { text: "continue" },
+        ],
+      ]);
+    }));
+
+  it("sends a seed-only fork's seed once after its setup fails", () =>
+    withHarness(async (harness) => {
+      const seed = hidden("Work only in the new worktree.");
+      const fork = await failSetup(harness, async (projectId, workspace) => {
+        const { thread: source } = await createReadyThread(harness, {
+          projectId,
+          workspace: { type: "unmanaged", path: harness.repoDir },
+        });
+        const response = await harness.api.threads.fork.$post({
+          json: {
+            sourceThreadId: source.id,
+            origin: "cli",
+            visibility: "visible",
+            agentContextSeed: [{ type: "text", mentions: [], ...seed }],
+            environment: { type: "host", hostId: harness.hostId, workspace },
+          },
+        });
+        return threadSchema.parse(await response.json());
+      });
+      await fork.fixSetup();
+      await fork.send("go on", "idle");
+      await fork.send("next", "idle");
+      expect(await fork.turnInputs()).toMatchObject([
+        [note, seed, { text: "go on" }],
+        [{ text: "next" }],
+      ]);
     }));
 
   it("reuses the same unmanaged environment when two host threads target the same path", () =>

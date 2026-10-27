@@ -46,6 +46,8 @@ export type SandboxLogin = "claude" | "codex" | "pi" | "github" | "cursor" | "op
 /** GitHub projects also name their repository and cloud folder, so the website can build a template. */
 export type SandboxProject = { id: string; repository: string | null; folder: string };
 const RECHECK_MS = 60_000;
+const PRELOAD_BATCH = 10, PRELOADS_PER_HOUR = 30, PRELOAD_AGAIN_MS = 3_600_000;
+const placeOf = (thread: string, project: SandboxProject) => ({ thread, project: project.id, ...(project.repository ? { repository: project.repository, folder: project.folder } : {}) });
 export type CloudQueue = { position: number; total: number; regionBlocked: boolean };
 /** A Free or Pro account's 30-day usage, for the sidebar upgrade card. The website sends `cpu_hours` as agent hours (ADR 0275).
  *  `og` is the OG letter, which the website sends only to OGs still on the free Pro it gave them (ADR 0218). */
@@ -444,6 +446,11 @@ export class SandboxDirectory {
   // After a failed wake, wait before asking again. Network and server errors retry every 2 s three times first;
   // then 5 s, doubling to 5 minutes. Delivery retries every tick otherwise.
   private readonly backoff = new Map<string, { until: number; delay: number; tries: number }>();
+  private readonly preloads = new Map<string, Promise<void>>();
+  private readonly preloaded = new Map<string, number>();
+  private readonly preloadQueue: { thread: string; project: SandboxProject }[] = [];
+  private preloadWorkers = 0;
+  private preloadOn = false;
   private uploaded = new Map<string, string>();
   /** Gets the threads automations started, from each awake check; the app shows the ones it doesn't have yet. */
   onRuns: (runs: AutomationRun[]) => void = () => {};
@@ -585,8 +592,13 @@ export class SandboxDirectory {
 
   /** The thread's Core, or null while it sleeps. `wake` starts it; only callers with work to send pass true. */
   async connection(thread: string, project: SandboxProject, wake: boolean, trigger?: SandboxWakeTrigger): Promise<SandboxConnection | null> {
+    const preloading = wake ? this.preloads.get(thread) : undefined;
+    if (preloading) {
+      this.wakeStarts.set(thread, Date.now());
+      await preloading;
+    }
     let view = this.views.get(thread);
-    const place = { thread, project: project.id, ...(project.repository ? { repository: project.repository, folder: project.folder } : {}) };
+    const place = placeOf(thread, project);
     if (!wake && view?.state !== "awake") {
       const found = (await this.awakeList()).get(thread);
       if (found) view = this.remember({ thread, state: "awake", generation: view?.generation ?? 0, issue: null, ...found });
@@ -638,9 +650,10 @@ export class SandboxDirectory {
     const value = z.object({
       sandboxes: z.boolean(), limited: z.boolean().default(false),
       queue: z.object({ position: z.number(), total: z.number() }).nullable().default(null), region_blocked: z.boolean().default(false),
-      plan: z.string().nullable().default(null),
+      plan: z.string().nullable().default(null), preload: z.boolean().default(false),
     }).parse(await this.call({ action: "mode" }));
     this.plan = value.plan;
+    this.preloadOn = value.preload;
     this.mode = { on: value.sandboxes, at: Date.now() };
     this.limit = { on: value.limited, at: Date.now() };
     this.queue = value.queue || value.region_blocked ? { position: value.queue?.position ?? 0, total: value.queue?.total ?? 0, regionBlocked: value.region_blocked } : null;
@@ -651,6 +664,39 @@ export class SandboxDirectory {
   /** The account's place in the cloud queue, or a blocked region: new Cloud threads wait (docs/scopes/public-launch.md).
    *  Null when it may start them. Refreshed with forNewThreads(). */
   cloudQueue(): CloudQueue | null { return this.queue; }
+
+  async preload(threads: { thread: string; project: SandboxProject }[], beforeWake: () => Promise<void>): Promise<void> {
+    if (!this.mode) await this.forNewThreads();
+    if (this.usageLimited() || !this.preloadOn) return;
+    const now = Date.now();
+    for (const [thread, at] of this.preloaded) if (now - at >= PRELOAD_AGAIN_MS) this.preloaded.delete(thread);
+    const room = Math.min(PRELOAD_BATCH - this.preloadQueue.length - this.preloads.size, PRELOADS_PER_HOUR - this.preloaded.size);
+    const due = threads.filter(({ thread }) => !this.preloaded.has(thread) && !this.preloads.has(thread) && !this.wakes.has(thread) && !this.isAwake(thread) && !this.coolingDown(thread)).slice(0, Math.max(0, room));
+    if (!due.length) return;
+    for (const { thread } of due) this.preloaded.set(thread, now);
+    this.preloadQueue.push(...due);
+    await beforeWake().catch(() => {});
+    const workers: Promise<void>[] = [];
+    for (let started = this.preloadWorkers; started < 2; started++) workers.push(this.preloadNext());
+    await Promise.all(workers);
+  }
+
+  private async preloadNext(): Promise<void> {
+    this.preloadWorkers++;
+    try {
+      for (let item = this.preloadQueue.shift(); item; item = this.preloadQueue.shift()) await this.preloadOne(item.thread, item.project);
+    } finally { this.preloadWorkers--; }
+  }
+
+  private preloadOne(thread: string, project: SandboxProject): Promise<void> {
+    this.wakeStarts.set(thread, Date.now());
+    const run = macHarnessVersions().then(harnesses => {
+      this.wakeHarnesses.set(thread, harnesses);
+      return this.call({ action: "wake", ...placeOf(thread, project), harnesses, trigger: "sidebar_preload" });
+    }).then(value => this.woke(this.remember(viewSchema.parse(value)).thread)).catch(() => {}).finally(() => this.preloads.delete(thread));
+    this.preloads.set(thread, run);
+    return run;
+  }
 
   private readonly capped = new Set<string>();
   /** Whether this new thread was refused for its plan's launch cap; cleared when it starts. */
@@ -723,6 +769,9 @@ export class SandboxDirectory {
     this.mode = null;
     this.limit = null;
     this.plan = null;
+    this.preloadOn = false;
+    this.preloaded.clear();
+    this.preloadQueue.length = 0;
     this.usage = null;
     this.capped.clear();
     this.warmed = null;
@@ -740,8 +789,8 @@ export class SandboxDirectory {
 
   /** Saves a thread's title, project name, harness, model, Core session ID, and the thread that started it on the
    *  website (ADR 0182, 0239, 0256). */
-  async label(thread: string, label: { title: string | null; project_name: string | null; project: string; session: string; harness: string; model: string | null; parent: string | null }): Promise<void> {
-    await this.call({ action: "label", thread, ...label });
+  async label(thread: string, label: { title: string | null; project_name: string | null; project: string; session: string; harness: string; model: string | null; parent: string | null }): Promise<boolean> {
+    return z.object({ saved: z.boolean() }).catch({ saved: false }).parse(await this.call({ action: "label", thread, ...label })).saved;
   }
   async archive(thread: string): Promise<void> { this.forget(thread); await this.call({ action: "archive", thread }); }
   async refreshCodex(thread: string): Promise<void> { await this.call({ action: "codex", thread }); }

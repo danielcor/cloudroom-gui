@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, open, rm } from "node:fs/promises";
+import { constants, copyFile, link, lstat, mkdir, mkdtemp, open, readdir, readlink, realpath, rename, rm, rmdir, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -15,7 +15,15 @@ import { outputJson, type JsonOutputOptions } from "./helpers.js";
 /** VM paths may start with ~ (the agent home); everything else stays literal. */
 function quote(path: string): string {
   const [prefix, rest] = path === "~" ? ['"$HOME"', ""] : path.startsWith("~/") ? ['"$HOME"/', path.slice(2)] : ["", path];
-  return rest ? `${prefix}'${rest.replaceAll("'", "'\\''")}'` : prefix;
+  return rest ? prefix + literal(rest) : prefix;
+}
+
+function literal(text: string): string {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+function lastLine(output: Buffer): string {
+  return output.toString().trim().split("\n").pop() ?? "";
 }
 
 async function readStdin(): Promise<Buffer> {
@@ -30,11 +38,11 @@ type VmTarget = { thread?: string };
 const THREAD_OPTION = ["--thread <id>", "Cloud thread whose sandbox to use; required unless you have a cloud VM"] as const;
 
 /** Runs on the VM or sandbox and fails with its error output unless the command succeeds. */
-async function runOnVm(url: string, target: VmTarget, command: string, stdin = Buffer.alloc(0)): Promise<Buffer> {
+async function runOnVm(url: string, target: VmTarget, command: string, stdin = Buffer.alloc(0)): Promise<{ stdout: Buffer; stderr: Buffer }> {
   const result = await createCliBbSdk(url).cloudroom.runOnVm({ command, stdin: stdin.toString("hex"), threadId: target.thread });
   if (result.truncated) throw new Error("Transfer exceeded the 16 MiB limit.");
-  if (result.code !== 0) throw new Error(Buffer.from(result.stderr, "hex").toString() || `VM command failed (${result.code})`);
-  return Buffer.from(result.stdout, "hex");
+  if (result.code !== 0) throw new Error(Buffer.from(result.stderr, "hex").toString().trimEnd() || `VM command failed (${result.code})`);
+  return { stdout: Buffer.from(result.stdout, "hex"), stderr: Buffer.from(result.stderr, "hex") };
 }
 
 // Under the app's 16 MiB stdin limit; the app splits each piece again for the sandbox proxy.
@@ -75,35 +83,61 @@ export function registerVmCommands(program: Command, getUrl: () => string): void
       if (result.truncated) process.stderr.write("Output exceeded 16 MiB and was truncated.\n");
       process.exitCode = result.code ?? 1;
     }));
-  vm.command("pull <vm-path> [local-folder]").description("Copy a VM or sandbox file or folder to this Mac (default: current folder)")
+  vm.command("pull <vm-path> [local-path]").description("Copy a VM or sandbox file or folder to this Mac, like cp: into an existing folder or a path ending in / (default: current folder), else under that new name, which must not exist yet.")
     .option(...THREAD_OPTION)
     .action(action(async (source: string, target = ".", options: VmTarget = {}) => {
-      const archive = await runOnVm(getUrl(), options, `p=${quote(source)}; cd -- "$(dirname -- "$p")" && tar -czf - -- "$(basename -- "$p")"`);
-      await mkdir(target, { recursive: true });
-      await new Promise<void>((resolve, reject) => {
-        const tar = spawn("tar", ["-xzf", "-", "-C", target], { stdio: ["pipe", "inherit", "inherit"] });
-        tar.on("error", reject).on("close", (code) => code === 0 ? resolve() : reject(new Error("Could not unpack the copied files.")));
-        tar.stdin.end(archive);
-      });
-      console.log(JSON.stringify({ copied: source, to: target }));
+      const inside = target.endsWith("/") || await stat(target).then((s) => s.isDirectory(), () => false);
+      const taken = new Error(`${target} already exists; nothing was copied.`);
+      if (!inside && await lstat(target).then(() => true, () => false)) throw taken;
+      const { stdout: archive, stderr } = await runOnVm(getUrl(), options, `p=${quote(source)}; case $p in */) [ -L "\${p%/}" ] && p=$p.;; esac; case $(basename -- "$p") in .|..) p=$(cd -P -- "$p" >/dev/null && pwd -P) || exit 1;; esac; `
+        + `n=$(basename -- "$p"); cd -- "$(dirname -- "$p")" && tar -czf - -- "$n" && printf '%s\\n' "$n" >&2`);
+      await mkdir(inside ? target : dirname(target), { recursive: true });
+      const folder = inside ? target : await mkdtemp(join(await realpath(dirname(target)), ".cloudroom-"));
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tar = spawn("tar", ["-xzf", "-", "-C", folder], { stdio: ["pipe", "inherit", "inherit"] });
+          tar.on("error", reject).on("close", (code) => code === 0 ? resolve() : reject(new Error("Could not unpack the copied files.")));
+          tar.stdin.end(archive);
+        });
+        if (!inside) {
+          const [entry, ...rest] = await readdir(folder);
+          if (!entry || rest.length) throw new Error("Could not unpack the copied files.");
+          const copy = join(folder, entry);
+          const kind = await lstat(copy);
+          const placed = kind.isDirectory() ? mkdir(target).then(() => rename(copy, target).catch(async (error) => { await rmdir(target).catch(() => {}); throw error; }))
+            : kind.isSymbolicLink() ? readlink(copy).then((path) => symlink(path, target))
+            : link(copy, target).catch((error: NodeJS.ErrnoException) => { if (error.code === "EEXIST") throw error; return copyFile(copy, target, constants.COPYFILE_EXCL); });
+          await placed.catch((error: NodeJS.ErrnoException) => { throw error.code === "EEXIST" ? taken : error; });
+        }
+      } finally {
+        if (!inside) await rm(folder, { recursive: true, force: true });
+      }
+      console.log(JSON.stringify({ copied: source, to: inside ? join(await realpath(target), lastLine(stderr)) : target }));
     }));
-  vm.command("push <local-path> [vm-folder]").description("Copy a file or folder from this Mac to the VM or sandbox (default: agent home)")
+  vm.command("push <local-path> [vm-path]").description("Copy a file or folder from this Mac to the VM or sandbox, like cp: into an existing folder or a path ending in / (default: agent home), else under that new name, which must not exist yet.")
     .option(...THREAD_OPTION)
     .action(action(async (source: string, target = "~", options: VmTarget = {}) => {
+      const linked = source.endsWith("/") && await lstat(source.replace(/\/+$/, "")).then((s) => s.isSymbolicLink(), () => false);
+      const from = linked || [".", ".."].includes(basename(source)) ? await realpath(source) : source;
       const local = await mkdtemp(join(tmpdir(), "room-push-"));
       const archive = join(local, "push.tgz");
       const remote = `~/.cache/cloudroom/push-${randomUUID()}.tgz`;
+      let to: string;
       try {
-        await promisify(execFile)("tar", ["--no-xattrs", "-czf", archive, "-C", dirname(source), "--", basename(source)], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+        await promisify(execFile)("tar", ["--no-xattrs", "-czf", archive, "-C", dirname(from), "--", basename(from)], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
         await uploadFile(getUrl(), options, archive, remote);
-        await runOnVm(getUrl(), options, `f=${remote}; d=${quote(target)}; mkdir -p -- "$d" && tar -xzf "$f" -C "$d"; s=$?; rm -f -- "$f"; exit $s`);
+        to = lastLine((await runOnVm(getUrl(), options, `f=${remote}; d=${quote(target)}; n=${literal(basename(from))}; p=$(dirname -- "$d"); mkdir -p -- "${target.endsWith("/") ? "$d" : "$p"}" || exit 1; `
+          + `used() { [ -e "$d" ] || [ -L "$d" ] && printf 'VM path %s already exists; nothing was copied.\\n' "$d" >&2; }; `
+          + `if [ -d "$d" ]; then x=$d; to=\${d%/}/$n; else used && exit 1; x=$(mktemp -d "$p/.cloudroom.XXXXXX"); trap 'rm -rf "$x"; exit 1' 1 2 15; to=$d; fi; `
+          + `tar -xzf "$f" -C "$x"; s=$?; [ "$x" = "$d" ] || { [ $s = 0 ] && ! used && mv -- "$x/$n" "$d" || s=1; rm -rf "$x"; }; `
+          + `rm -f -- "$f"; [ $s != 0 ] || printf '%s\\n' "$to"; exit $s`)).stdout);
       } catch (error) {
         await runOnVm(getUrl(), options, `rm -f -- ${remote}`).catch(() => {});
         throw error;
       } finally {
         await rm(local, { recursive: true, force: true });
       }
-      console.log(JSON.stringify({ copied: source, to: target }));
+      console.log(JSON.stringify({ copied: source, to }));
     }));
 }
 

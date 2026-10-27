@@ -11,20 +11,15 @@ import {
   win32,
 } from "node:path";
 import { resolveContainedPath } from "@cloudroom/process-utils";
-import type { PromptInput } from "@cloudroom/domain";
+import {
+  PROMPT_FILE_ATTACHMENT_LIMIT_BYTES,
+  PROMPT_IMAGE_ATTACHMENT_LIMIT_BYTES,
+  type PromptInput,
+} from "@cloudroom/domain";
 import type { UploadedPromptAttachment } from "@cloudroom/server-contract";
 import mimeTypes from "mime-types";
 import { ApiError } from "../../errors.js";
-
-const IMAGE_LIMIT_BYTES = 10 * 1024 * 1024;
-const FILE_LIMIT_BYTES = 25 * 1024 * 1024;
-
-const HEIF_IMAGE_MIME_TYPES = new Set([
-  "image/heic",
-  "image/heic-sequence",
-  "image/heif",
-  "image/heif-sequence",
-]);
+import { heicToJpeg } from "./heic-to-jpeg.js";
 
 type PromptAttachmentInput = Extract<
   PromptInput,
@@ -142,25 +137,16 @@ export async function validatePromptAttachmentReferences(
   }
 }
 
-function isHeifImageUpload(file: File): boolean {
-  const mimeType = (file.type.split(";")[0] ?? "").trim().toLowerCase();
-  return HEIF_IMAGE_MIME_TYPES.has(mimeType);
-}
-
 export async function storeAttachment(
   dataDir: string,
   projectId: string,
-  file: File,
+  upload: File,
 ): Promise<UploadedPromptAttachment> {
-  if (isHeifImageUpload(file)) {
-    throw new ApiError(
-      400,
-      "invalid_request",
-      "HEIC images are not supported. Convert the image to JPEG or PNG before attaching it.",
-    );
-  }
+  const file = await heicToJpeg(upload);
   const isImage = (file.type || "").startsWith("image/");
-  const sizeLimit = isImage ? IMAGE_LIMIT_BYTES : FILE_LIMIT_BYTES;
+  const sizeLimit = isImage
+    ? PROMPT_IMAGE_ATTACHMENT_LIMIT_BYTES
+    : PROMPT_FILE_ATTACHMENT_LIMIT_BYTES;
   if (file.size > sizeLimit) {
     throw new ApiError(
       400,

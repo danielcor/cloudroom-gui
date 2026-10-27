@@ -1,6 +1,11 @@
 import { mkdir, rm, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ClientTurnRequestId, PromptInput } from "@cloudroom/domain";
+import {
+  PROMPT_FILE_ATTACHMENT_LIMIT_BYTES,
+  PROMPT_IMAGE_ATTACHMENT_LIMIT_BYTES,
+  type ClientTurnRequestId,
+  type PromptInput,
+} from "@cloudroom/domain";
 import { resolveContainedPath } from "@cloudroom/process-utils";
 import {
   CommandDispatchError,
@@ -12,8 +17,6 @@ type AttachmentPromptInput = Extract<
   { type: "localFile" | "localImage" }
 >;
 
-const IMAGE_ATTACHMENT_LIMIT_BYTES = 10 * 1024 * 1024;
-const FILE_ATTACHMENT_LIMIT_BYTES = 25 * 1024 * 1024;
 const STAGED_ATTACHMENT_MODE = 0o600;
 
 interface StagePromptAttachmentsArgs {
@@ -86,8 +89,8 @@ function attachmentFetchErrorMessage(error: unknown): string {
 
 function attachmentSizeLimitBytes(attachment: AttachmentPromptInput): number {
   return attachment.type === "localImage"
-    ? IMAGE_ATTACHMENT_LIMIT_BYTES
-    : FILE_ATTACHMENT_LIMIT_BYTES;
+    ? PROMPT_IMAGE_ATTACHMENT_LIMIT_BYTES
+    : PROMPT_FILE_ATTACHMENT_LIMIT_BYTES;
 }
 
 function expectedAttachmentSizeBytes(

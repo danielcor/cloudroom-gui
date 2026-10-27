@@ -176,6 +176,7 @@ export const terminalOutputResponseSchema = z
     chunks: z.array(terminalOutputChunkSchema),
     nextSeq: z.number().int().nonnegative(),
     truncated: z.boolean(),
+    exitCode: z.number().int().nullable().optional(),
   })
   .strict();
 export type TerminalOutputResponse = z.infer<

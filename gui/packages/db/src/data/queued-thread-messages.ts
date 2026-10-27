@@ -1390,7 +1390,7 @@ export function listThreadIdsWithHostOfflineQueueWaits(
 }
 
 export function deleteQueuedThreadRetries(
-  db: DbConnection,
+  db: DbQueryConnection,
   notifier: DbNotifier,
   threadId: string,
 ): QueuedThreadMessageRow[] {

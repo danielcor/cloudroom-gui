@@ -11,6 +11,7 @@ import {
   experimental_ProviderIcon as ProviderIcon,
   experimental_useSidebarThreads,
   type ExperimentalSidebarFooterDisclosureProps,
+  UrlLink,
   useBbContext,
 } from "@get-bb/plugin-sdk/app";
 import { Icon } from "@cloudroom/shared-ui/icon";
@@ -60,7 +61,6 @@ import {
   planMeterPercent,
   type PlanSummary,
 } from "./plan-usage.js";
-import { UsageSettings } from "./settings.js";
 
 export interface UsageStoreSnapshot {
   data: UsageSnapshot | null;
@@ -197,7 +197,7 @@ function UsageBlocks({ usedPercent }: { usedPercent: number }) {
         <span
           key={index}
           className={cn(
-            "h-[9px] w-[5px] rounded-[1px]",
+            "h-[9px] w-[clamp(2px,calc((100cqw_-_11ch_-_125px)/12),5px)] rounded-[1px]",
             index < lit ? usageBarColorClass(usedPercent) : "bg-sidebar-border",
           )}
         />
@@ -218,7 +218,7 @@ function UsageLine({
   detail: string;
 }) {
   return (
-    <span className="flex items-center gap-[7px] whitespace-nowrap">
+    <span className="@container flex items-center gap-[7px] whitespace-nowrap">
       <span aria-hidden="true" className="text-subtle-foreground">
         {last ? "└" : "├"}
       </span>
@@ -244,14 +244,23 @@ function UsageLine({
   );
 }
 
-function PlanUsage({ plan }: { plan: PlanSummary }) {
+function PlanUsage({
+  plan,
+  className,
+}: {
+  plan: PlanSummary;
+  className?: string;
+}) {
   return (
     <section
       aria-label="Cloudroom plan"
-      className="border-b border-dashed border-sidebar-border pb-1.5"
+      className={cn(
+        "border-b border-dashed border-sidebar-border pb-1.5",
+        className,
+      )}
     >
       <h2 className="flex min-w-0 items-center gap-2 font-normal">
-        <Icon name="Cloud" aria-hidden="true" className="size-3 shrink-0" />
+        <img src="/icon-192.png?v=room" alt="" aria-hidden="true" className="size-3 shrink-0 object-contain" />
         <span className="shrink-0 lowercase text-primary-text">cloudroom</span>
         <span className="min-w-0 truncate text-subtle-foreground">
           {plan.plan}
@@ -645,6 +654,32 @@ function TimeInCloudroom() {
 }
 
 const PLAN_RETRY_MS = 10_000;
+const MONO_CLASS = "font-mono text-[10.5px] leading-[1.75]";
+const CARD_HEADER_CLASS =
+  "mx-1.5 flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-sidebar-border pr-1 font-mono text-[10.5px] text-subtle-foreground";
+const USAGE_CARD_CLASS =
+  "overflow-hidden rounded-xl border border-border bg-card text-sidebar-foreground";
+const BILLING_URL = "https://www.cloudroom.dev/billing";
+const FREE_WITHOUT_CREDITS = [
+  "new cloud agents",
+  "idle cloud threads",
+  "sleeping sandboxes",
+  "waiting for you",
+  "local threads",
+  "your ai tokens",
+  "your own computers",
+  "chat history",
+  "archived threads",
+  "spare sandboxes",
+  "the cloud queue",
+  "desktop app",
+  "phone app",
+  "plugins and skills",
+  "voice input",
+  "share links",
+  "inviting friends",
+  "reviewing diffs",
+];
 
 function usePlanSummary(): [PlanSummary | null, () => void] {
   const [plan, setPlan] = useState(lastPlan);
@@ -683,7 +718,7 @@ export function ProviderUsageStatusContent({
   plan = null,
   reloadPlan,
   refreshEnabled = true,
-}: ExperimentalSidebarFooterDisclosureProps & {
+}: Partial<ExperimentalSidebarFooterDisclosureProps> & {
   snapshot: UsageStoreSnapshot;
   threadMachineId: string | null;
   plan?: PlanSummary | null;
@@ -772,11 +807,8 @@ export function ProviderUsageStatusContent({
   }, []);
 
   return (
-    <div className="flex max-h-80 flex-col">
-      <div
-        data-provider-usage-header=""
-        className="mx-1.5 flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-sidebar-border pr-1 font-mono text-[10.5px] text-subtle-foreground"
-      >
+    <div className={cn("flex flex-col", dismiss && "max-h-80")}>
+      <div data-provider-usage-header="" className={CARD_HEADER_CLASS}>
         <div className="flex min-w-0 flex-1">
           <MachineSelector
             machines={machines}
@@ -807,16 +839,23 @@ export function ProviderUsageStatusContent({
             }
           />
         </button>
-        <button
-          type="button"
-          aria-label="Collapse provider usage"
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-          onClick={dismiss}
-        >
-          <Icon name="ChevronDown" aria-hidden="true" className="size-3.5" />
-        </button>
+        {dismiss ? (
+          <button
+            type="button"
+            aria-label="Collapse provider usage"
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            onClick={dismiss}
+          >
+            <Icon name="ChevronDown" aria-hidden="true" className="size-3.5" />
+          </button>
+        ) : null}
       </div>
-      <div className="min-h-0 space-y-1.5 overflow-y-auto px-[11px] pb-2.5 pt-1.5 font-mono text-[10.5px] leading-[1.75]">
+      <div
+        className={cn(
+          "min-h-0 space-y-1.5 overflow-y-auto px-[11px] pb-2.5 pt-1.5",
+          MONO_CLASS,
+        )}
+      >
         {plan === null || plan.meters.length === 0 ? null : (
           <PlanUsage plan={plan} />
         )}
@@ -897,6 +936,130 @@ export function ProviderUsageStatusContent({
         ))}
       </div>
     </div>
+  );
+}
+
+function PriceChip({ label, className }: { label: string; className: string }) {
+  return (
+    <span
+      className={cn(
+        "rounded-[3px] px-1.5 font-bold tracking-wider text-primary-foreground",
+        className,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function CreditsPriceList() {
+  const columnLength = Math.ceil(FREE_WITHOUT_CREDITS.length / 2);
+  return (
+    <section aria-label="What uses credits" className={USAGE_CARD_CLASS}>
+      <h2 className={cn(CARD_HEADER_CLASS, "pl-[5px] font-normal")}>
+        ~/what uses credits
+      </h2>
+      <div
+        className={cn(
+          "grid gap-x-4 gap-y-3 px-[11px] pb-2.5 pt-2 sm:grid-cols-3",
+          MONO_CLASS,
+        )}
+      >
+        <div>
+          <p className="mb-1 flex items-center gap-2">
+            <PriceChip label="PAID" className="bg-primary" />
+            <span className="text-subtle-foreground">uses credits</span>
+          </p>
+          <p className="flex gap-[7px] font-bold text-foreground">
+            <span
+              aria-hidden="true"
+              className="font-normal text-subtle-foreground"
+            >
+              └
+            </span>
+            agents actively running
+          </p>
+        </div>
+        <div className="sm:col-span-2 sm:border-l sm:border-dashed sm:border-border sm:pl-4">
+          <p className="mb-1 flex items-center gap-2">
+            <PriceChip label="FREE" className="bg-success" />
+            <span className="text-subtle-foreground">0 credits</span>
+          </p>
+          <ul className="grid gap-x-6 sm:auto-cols-fr sm:grid-flow-col sm:grid-rows-9">
+            {FREE_WITHOUT_CREDITS.map((item, index) => (
+              <li key={item} className="flex min-w-0 gap-[7px]">
+                <span aria-hidden="true" className="text-subtle-foreground">
+                  {(index + 1) % columnLength === 0 ||
+                  index === FREE_WITHOUT_CREDITS.length - 1
+                    ? "└"
+                    : "├"}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{item}</span>
+                <span className="font-bold text-success">0</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function UsagePageContent({
+  snapshot,
+  plan,
+  reloadPlan,
+  refreshEnabled = true,
+}: {
+  snapshot: UsageStoreSnapshot;
+  plan: PlanSummary | null;
+  reloadPlan?: () => void;
+  refreshEnabled?: boolean;
+}) {
+  return (
+    <div className="space-y-3 [zoom:1.25]">
+      {plan === null || plan.meters.length === 0 ? null : (
+        <div
+          className={cn(
+            USAGE_CARD_CLASS,
+            "flex items-start gap-3 px-[11px] py-2",
+            MONO_CLASS,
+          )}
+        >
+          <PlanUsage plan={plan} className="min-w-0 flex-1 border-0 pb-0" />
+          <UrlLink
+            href={BILLING_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 text-foreground no-underline hover:bg-muted"
+          >
+            billing
+            <Icon name="ExternalLink" aria-hidden="true" className="size-3" />
+          </UrlLink>
+        </div>
+      )}
+      <CreditsPriceList />
+      <div className={USAGE_CARD_CLASS}>
+        <ProviderUsageStatusContent
+          snapshot={snapshot}
+          threadMachineId={null}
+          reloadPlan={reloadPlan}
+          refreshEnabled={refreshEnabled}
+        />
+      </div>
+    </div>
+  );
+}
+
+function UsageSettings() {
+  const snapshot = useSyncExternalStore(
+    subscribeStore,
+    getStoreSnapshot,
+    getStoreSnapshot,
+  );
+  const [plan, reloadPlan] = usePlanSummary();
+  return (
+    <UsagePageContent snapshot={snapshot} plan={plan} reloadPlan={reloadPlan} />
   );
 }
 

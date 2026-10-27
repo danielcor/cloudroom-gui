@@ -102,6 +102,16 @@ describe("room-cli thread action command output", () => {
     expect(collectLogLines(vi.mocked(console.log))).toContain(
       "Thread thread-unarchive-1 unarchived",
     );
+
+    await runCommand(
+      ["thread", "unarchive", "--self", "--keep-parent"],
+      register,
+    );
+
+    expect(unarchivePost).toHaveBeenLastCalledWith({
+      param: { id: "thread-unarchive-1" },
+      query: { keepParent: "true" },
+    });
   });
 
   it("room-cli thread edit-message targets the latest editable message by default", async () => {

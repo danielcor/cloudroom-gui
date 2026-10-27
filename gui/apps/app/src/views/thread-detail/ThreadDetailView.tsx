@@ -1051,7 +1051,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const [composerFocusRequestNonce, setComposerFocusRequestNonce] = useState(0);
   // Feedback #116: users could not find how to report bugs. Fill this composer when empty, else a new thread.
   const reportBug = useCallback(() => {
-    void fetchWithAppSurface("/api/v1/cloudroom/bug-report-clicked", { method: "POST" }).catch(() => {});
+    void fetchWithAppSurface("/api/v1/cloudroom/bug-report-clicked", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
     if (isPromptDraftEmpty(selectionPromptDraft.getCurrent())) {
       selectionPromptDraft.setDraft({ text: REPORT_BUG_PROMPT, mentions: [], attachments: [] });
       setComposerFocusRequestNonce((nonce) => nonce + 1);

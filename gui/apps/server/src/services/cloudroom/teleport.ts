@@ -480,7 +480,7 @@ class Teleport {
       tx.insert(cloudroomThreads)
         .values({
           threadId,
-          coreUrl: cloudroom(this.deps).teleportUrl,
+          coreUrl: cloudroom(this.deps).teleportUrl(threadId),
           startRequestId: `teleport_${state.id}`,
           model: state.model,
           reasoning: state.reasoning,
@@ -1110,7 +1110,7 @@ class Teleport {
         tx.insert(cloudroomThreads)
           .values({
             threadId: state.threadId,
-            coreUrl: cloudroom(this.deps).teleportUrl,
+            coreUrl: cloudroom(this.deps).teleportUrl(state.threadId),
             startRequestId: `teleport_${state.id}`,
             sessionId: remote.session_id,
             model: state.model,

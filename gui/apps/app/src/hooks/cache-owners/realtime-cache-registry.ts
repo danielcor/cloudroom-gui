@@ -20,7 +20,7 @@ import {
   getEnvironmentBranchListInvalidationQueryKeys,
   getEnvironmentRecordInvalidationQueryKeys,
   getEnvironmentWorkspaceStateInvalidationQueryKeys,
-  getFetchingThreadListQueryKeys,
+  getFetchingThreadListQueries,
   isArchivedThreadListQueryKey,
   updateCachedThreadListPendingInteractionState,
   updateCachedThreadListStatusState,
@@ -56,6 +56,7 @@ import {
   environmentWorkStatusQueryKeyPrefix,
   hostProviderCliStatusQueryKey,
   hostsQueryKey,
+  projectsQueryKey,
   sidebarNavigationQueryKey,
   systemConfigQueryKey,
   uiPreferencesQueryKey,
@@ -118,6 +119,7 @@ const trailingActiveRefetchUnsubscribers = new WeakMap<
 interface ThrottledActiveRefetchEntry {
   lastRunAt: number;
   timer: ReturnType<typeof setTimeout> | null;
+  unsubscribe: (() => void) | null;
 }
 
 const throttledActiveRefetchEntries = new WeakMap<
@@ -134,7 +136,21 @@ interface ThrottledActiveRefetchArgs {
 
 const WORK_STATUS_REFETCH_MIN_INTERVAL_MS = 1_000;
 
-const THREAD_LIST_STATUS_FALLBACK_REFETCH_MIN_INTERVAL_MS = 1_000;
+const LIST_REFETCH_MIN_INTERVAL_MS = 1_000;
+
+const THROTTLED_LIST_QUERY_ROOTS = new Set<unknown>([
+  sidebarNavigationQueryKey()[0],
+  projectsQueryKey()[0],
+  threadsQueryKey()[0],
+  threadSearchQueryKeyPrefix()[0],
+]);
+
+const statusPatchesByFetchingQuery = new WeakMap<
+  QueryClient,
+  Map<string, Map<string, ThreadStatusChangeMetadata>>
+>();
+
+const statusPatchUnsubscribers = new WeakMap<QueryClient, () => void>();
 
 const TRAILING_REFETCH_MIN_INTERVAL_MS = 50;
 const TRAILING_REFETCH_MAX_INTERVAL_MS = 1_000;
@@ -172,23 +188,6 @@ function hasActiveQueries(
   );
 }
 
-function refetchActiveQueriesWithoutCanceling({
-  exact,
-  queryClient,
-  queryKey,
-}: ScheduleTrailingActiveRefetchArgs): void {
-  const hadActiveFetch = hasActiveFetchingQueries(queryClient, queryKey, exact);
-  void queryClient
-    .refetchQueries(
-      { exact, queryKey, type: "active" },
-      { cancelRefetch: false },
-    )
-    .catch(() => {});
-  if (hadActiveFetch) {
-    scheduleTrailingActiveRefetch({ exact, queryClient, queryKey });
-  }
-}
-
 function invalidateQueryKeyWithThrottledActiveRefetch({
   exact,
   minIntervalMs,
@@ -197,27 +196,116 @@ function invalidateQueryKeyWithThrottledActiveRefetch({
 }: ThrottledActiveRefetchArgs): void {
   queryClient.invalidateQueries({ exact, queryKey, refetchType: "none" });
 
-  const scheduleKey = timelineInvalidationKey(queryKey);
   let entries = throttledActiveRefetchEntries.get(queryClient);
   if (!entries) {
     entries = new Map();
     throttledActiveRefetchEntries.set(queryClient, entries);
   }
-  const entry = entries.get(scheduleKey);
-  if (entry?.timer) {
-    return;
-  }
-  const run = () => {
-    entries.set(scheduleKey, { lastRunAt: Date.now(), timer: null });
-    refetchActiveQueriesWithoutCanceling({ exact, queryClient, queryKey });
+  const scheduleKey = `${exact}:${timelineInvalidationKey(queryKey)}`;
+  const entry = entries.get(scheduleKey) ?? {
+    lastRunAt: Number.NEGATIVE_INFINITY,
+    timer: null,
+    unsubscribe: null,
   };
-  const lastRunAt = entry?.lastRunAt ?? Number.NEGATIVE_INFINITY;
-  const delayMs = Math.max(0, lastRunAt + minIntervalMs - Date.now());
-  if (delayMs === 0) {
-    run();
+  entries.set(scheduleKey, entry);
+  if (entry.timer || entry.unsubscribe) {
     return;
   }
-  entries.set(scheduleKey, { lastRunAt, timer: setTimeout(run, delayMs) });
+  const schedule = (): void => {
+    if (hasActiveFetchingQueries(queryClient, queryKey, exact)) {
+      const unsubscribe = queryClient.getQueryCache().subscribe(() => {
+        if (hasActiveFetchingQueries(queryClient, queryKey, exact)) {
+          return;
+        }
+        unsubscribe();
+        entry.unsubscribe = null;
+        schedule();
+      });
+      entry.unsubscribe = unsubscribe;
+      return;
+    }
+    const delayMs = entry.lastRunAt + minIntervalMs - Date.now();
+    if (delayMs > 0) {
+      entry.timer = setTimeout(() => {
+        entry.timer = null;
+        schedule();
+      }, delayMs);
+      return;
+    }
+    entry.lastRunAt = Date.now();
+    void queryClient
+      .refetchQueries(
+        { exact, queryKey, type: "active" },
+        { cancelRefetch: false },
+      )
+      .catch(() => {});
+  };
+  schedule();
+}
+
+function invalidateListQueryKey(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  exact: boolean,
+): void {
+  invalidateQueryKeyWithThrottledActiveRefetch({
+    exact,
+    minIntervalMs: LIST_REFETCH_MIN_INTERVAL_MS,
+    queryClient,
+    queryKey,
+  });
+}
+
+function keepStatusPatchOverInFlightLists(
+  queryClient: QueryClient,
+  threadId: string,
+  statusChange: ThreadStatusChangeMetadata,
+): void {
+  const queries = getFetchingThreadListQueries(queryClient);
+  if (queries.length === 0) {
+    return;
+  }
+  let patchesByQuery = statusPatchesByFetchingQuery.get(queryClient);
+  if (!patchesByQuery) {
+    patchesByQuery = new Map();
+    statusPatchesByFetchingQuery.set(queryClient, patchesByQuery);
+  }
+  for (const query of queries) {
+    const patches = patchesByQuery.get(query.queryHash) ?? new Map();
+    patches.set(threadId, statusChange);
+    patchesByQuery.set(query.queryHash, patches);
+  }
+  if (statusPatchUnsubscribers.has(queryClient)) {
+    return;
+  }
+  const pending = patchesByQuery;
+  const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "updated") {
+      return;
+    }
+    const { action, query } = event;
+    if (action.type === "success" ? action.manual : action.type !== "error") {
+      return;
+    }
+    const patches = pending.get(query.queryHash);
+    if (!patches) {
+      return;
+    }
+    pending.delete(query.queryHash);
+    if (pending.size === 0) {
+      unsubscribe();
+      statusPatchUnsubscribers.delete(queryClient);
+    }
+    if (action.type !== "success") {
+      return;
+    }
+    for (const [patchedThreadId, patch] of patches) {
+      updateCachedThreadListStatusState(queryClient, patchedThreadId, patch, {
+        keepNewer: true,
+      });
+    }
+  });
+  statusPatchUnsubscribers.set(queryClient, unsubscribe);
 }
 
 function scheduleTrailingActiveRefetch({
@@ -312,9 +400,13 @@ export function disposeTrailingActiveRefetches(queryClient: QueryClient): void {
       if (entry.timer) {
         clearTimeout(entry.timer);
       }
+      entry.unsubscribe?.();
     }
     throttledActiveRefetchEntries.delete(queryClient);
   }
+  statusPatchUnsubscribers.get(queryClient)?.();
+  statusPatchUnsubscribers.delete(queryClient);
+  statusPatchesByFetchingQuery.delete(queryClient);
   const unsubscribers = trailingActiveRefetchUnsubscribers.get(queryClient);
   if (!unsubscribers) {
     return;
@@ -426,7 +518,10 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   },
   "execution-options-changed": {
     flush: "immediate",
-    dirty: [dirtyThreadDetailQueries, dirtyThreadDefaultExecutionOptionsQueries],
+    dirty: [
+      dirtyThreadDetailQueries,
+      dirtyThreadDefaultExecutionOptionsQueries,
+    ],
   },
   "read-state-changed": {
     flush: "debounced",
@@ -673,6 +768,10 @@ export function executeRealtimeDirtyHandlers<
       continue;
     }
     for (const queryKey of queryKeys) {
+      if (THROTTLED_LIST_QUERY_ROOTS.has(queryKey[0])) {
+        invalidateListQueryKey(context.queryClient, queryKey, false);
+        continue;
+      }
       context.queryClient.invalidateQueries({ queryKey });
     }
   }
@@ -730,7 +829,7 @@ function dirtyThreadListQueries({
     for (const queryKey of getCachedGlobalThreadListInvalidationQueryKeys({
       queryClient,
     })) {
-      queryClient.invalidateQueries({ exact: true, queryKey });
+      invalidateListQueryKey(queryClient, queryKey, true);
     }
   }
   return getThreadListInvalidationQueryKeys({ projectId, queryClient });
@@ -750,31 +849,6 @@ function dirtyActiveThreadListQueries({
       ]
     : getCachedThreadListQueryKeys(queryClient);
   for (const queryKey of listQueryKeys) {
-    queryClient.invalidateQueries({
-      exact: true,
-      queryKey,
-      ...(isArchivedThreadListQueryKey(queryKey)
-        ? { refetchType: "none" }
-        : {}),
-    });
-  }
-  return [sidebarNavigationQueryKey(), threadSearchQueryKeyPrefix()];
-}
-
-function dirtyActiveThreadListQueriesWithThrottledRefetch({
-  projectId,
-  queryClient,
-}: ThreadRealtimeDirtyContext): void {
-  const listQueryKeys = projectId
-    ? [
-        ...getCachedProjectThreadListInvalidationQueryKeys({
-          projectId,
-          queryClient,
-        }),
-        ...getCachedGlobalThreadListInvalidationQueryKeys({ queryClient }),
-      ]
-    : getCachedThreadListQueryKeys(queryClient);
-  for (const queryKey of listQueryKeys) {
     if (isArchivedThreadListQueryKey(queryKey)) {
       queryClient.invalidateQueries({
         exact: true,
@@ -783,24 +857,9 @@ function dirtyActiveThreadListQueriesWithThrottledRefetch({
       });
       continue;
     }
-    invalidateQueryKeyWithThrottledActiveRefetch({
-      exact: true,
-      minIntervalMs: THREAD_LIST_STATUS_FALLBACK_REFETCH_MIN_INTERVAL_MS,
-      queryClient,
-      queryKey,
-    });
+    invalidateListQueryKey(queryClient, queryKey, true);
   }
-  for (const queryKey of [
-    sidebarNavigationQueryKey(),
-    threadSearchQueryKeyPrefix(),
-  ]) {
-    invalidateQueryKeyWithThrottledActiveRefetch({
-      exact: false,
-      minIntervalMs: THREAD_LIST_STATUS_FALLBACK_REFETCH_MIN_INTERVAL_MS,
-      queryClient,
-      queryKey,
-    });
-  }
+  return [sidebarNavigationQueryKey(), threadSearchQueryKeyPrefix()];
 }
 
 function dirtyThreadListQueriesForBackgroundActivity(
@@ -825,18 +884,18 @@ function dirtyRootOrderThreadListQueries({
   projectId,
   queryClient,
 }: ThreadRealtimeDirtyContext): void {
-  queryClient.invalidateQueries({ queryKey: sidebarNavigationQueryKey() });
+  invalidateListQueryKey(queryClient, sidebarNavigationQueryKey(), false);
   for (const queryKey of getCachedRootOrderThreadListInvalidationQueryKeys({
     projectId,
     queryClient,
   })) {
-    queryClient.invalidateQueries({ exact: true, queryKey });
+    invalidateListQueryKey(queryClient, queryKey, true);
   }
   if (!projectId) return;
   for (const queryKey of getCachedRootOrderThreadListInvalidationQueryKeys({
     queryClient,
   })) {
-    queryClient.invalidateQueries({ exact: true, queryKey });
+    invalidateListQueryKey(queryClient, queryKey, true);
   }
 }
 
@@ -927,6 +986,7 @@ function dirtyThreadTimelineQueries({
 
 function dirtyThreadTurnRequestQueries({
   eventTypes,
+  projectId,
   queryClient,
   threadId,
 }: ThreadRealtimeDirtyContext): QueryKey[] {
@@ -936,6 +996,7 @@ function dirtyThreadTurnRequestQueries({
   return [
     queryKey,
     ...getThreadPromptHistoryInvalidationQueryKeys({ threadId }),
+    ...getProjectPromptHistoryInvalidationQueryKeys({ projectId }),
   ];
 }
 
@@ -1058,22 +1119,16 @@ function patchThreadListPendingInteractionState({
   );
 }
 
-function patchThreadListStatusState(context: ThreadRealtimeDirtyContext): void {
-  const { flushOnce, queryClient, statusChange, threadId } = context;
+function patchThreadListStatusState(
+  context: ThreadRealtimeDirtyContext,
+): QueryKey[] {
+  const { queryClient, statusChange, threadId } = context;
   if (!threadId || !statusChange) {
-    dirtyActiveThreadListQueriesWithThrottledRefetch(context);
-    return;
+    return dirtyActiveThreadListQueries(context);
   }
   updateCachedThreadListStatusState(queryClient, threadId, statusChange);
-  for (const queryKey of getFetchingThreadListQueryKeys(queryClient)) {
-    queryClient.invalidateQueries({ exact: true, queryKey });
-  }
-  if (flushOnce("thread-search:status-changed")) {
-    invalidateQueryKeysWithoutCancelingActiveFetches({
-      queryClient,
-      queryKeys: [threadSearchQueryKeyPrefix()],
-    });
-  }
+  keepStatusPatchOverInFlightLists(queryClient, threadId, statusChange);
+  return [threadSearchQueryKeyPrefix()];
 }
 
 function dirtyEnvironmentRecordQueries(

@@ -2,9 +2,9 @@ import { COMPUTER } from "@cloudroom/domain";
 import type { Hono, MiddlewareHandler } from "hono";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
-import { getThread } from "@cloudroom/db";
+import { getThread, getThreadSectionById } from "@cloudroom/db";
 import { z } from "zod";
-import { threadGoalSetRequestSchema } from "@cloudroom/server-contract";
+import { threadGoalSetRequestSchema, updateThreadRequestSchema } from "@cloudroom/server-contract";
 import { cloudGitThreadId } from "@cloudroom/domain";
 import { cloudGitResponse } from "./git.js";
 import { cloudroom, isCloudThread } from "./commands.js";
@@ -29,6 +29,7 @@ import { tokenUsageSince } from "./loop-usage.js";
 import { macClis } from "./clis.js";
 import { finishMcpSignIn, isRemoteMcp, startMcpSignIn } from "./mcp-login.js";
 import { archiveThreadAndChildren } from "../threads/thread-archive.js";
+import { assertValidParentThread } from "../threads/thread-parent.js";
 import { queueChildThreadTurnNotificationBestEffort } from "../threads/child-thread-notifications.js";
 import { reportBug } from "./bug-reports.js";
 import { continueShare, shareThread, stopSharing, threadShare } from "./shares.js";
@@ -486,6 +487,12 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     void cloudroom(deps).wakeAhead(context.req.param("id"), reason === "view" ? "thread_view" : "thread_typing").catch(() => {});
     return context.json({ ok: true }, 202);
   });
+  app.post("/api/v1/cloudroom/preload", async (context) => {
+    const { threads } = await context.req.json<{ threads?: unknown }>().catch(() => ({ threads: undefined }));
+    const ids = Array.isArray(threads) ? threads.filter((id): id is string => typeof id === "string").slice(0, 50) : [];
+    if (ids.length) void cloudroom(deps).preload(ids).catch(() => {});
+    return context.json({ ok: true }, 202);
+  });
   const guard: MiddlewareHandler = async (context, next) => {
     if (["GET", "HEAD", "OPTIONS"].includes(context.req.method)) return next();
     // This runs before publicApi's browser guard, and the Cloud handlers below answer on their own, so check here too.
@@ -507,8 +514,26 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     const path = context.req.path.slice(`/api/v1/threads/${thread.id}`.length);
     if (context.req.method === "PATCH" && path === "") {
       const body = await context.req.json<unknown>();
-      // A model or harness change switches the thread in place (ADR 0211), in the shared update route.
-      if (body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).every((key) => ["title", "reasoningLevel", "model", "providerId"].includes(key))) return next();
+      // A model or harness change switches the thread in place (ADR 0211); a new parent is saved to the website first.
+      if (body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).every((key) => ["title", "reasoningLevel", "model", "providerId", "parentThreadId", "sectionId"].includes(key))) {
+        const parentId = (body as { parentThreadId?: unknown }).parentThreadId;
+        if (parentId === undefined || parentId === thread.parentThreadId || thread.deletedAt || (parentId !== null && typeof parentId !== "string") || !updateThreadRequestSchema.safeParse(body).success) return next();
+        if (["model", "providerId", "reasoningLevel"].some((key) => key in body)) return context.json({ message: "Change a Cloud thread's parent on its own, then change its model.", code: "cloudroom_parent_alone" }, 400);
+        const sectionId = (body as { sectionId?: unknown }).sectionId;
+        if (typeof sectionId === "string" && !getThreadSectionById(deps.db, sectionId)) throw new ApiError(404, "section_not_found", "Section not found");
+        const saved = binding(deps.db, thread.id), newParent = typeof parentId === "string" ? binding(deps.db, parentId) : null;
+        const sandbox = saved && sandboxThread(saved.coreUrl);
+        const onVm = Boolean(saved && !sandbox);
+        const ownSandbox = sandbox === thread.id;
+        const sameCore = ownSandbox && parentId !== thread.id && newParent?.coreUrl === saved?.coreUrl;
+        if (parentId === null ? !onVm : ownSandbox && !sameCore) {
+          if (typeof parentId === "string") assertValidParentThread(deps, { childThreadId: thread.id, parentThreadId: parentId, cloudChild: true });
+          for (const own of [saved, newParent]) if (own) await cloudroom(deps).requireOwnThread(own);
+          await cloudroom(deps).changeParent(thread.id, parentId as string | null, () => next());
+          return;
+        }
+        return context.json({ message: sameCore ? "A Cloud thread can't move under a thread that shares its sandbox." : onVm ? "A thread on your cloud VM can't change its parent." : `Only a Cloud thread in its own sandbox can ${thread.parentThreadId ? "move under another parent. Clear its parent (--clear-parent-thread) to make it top-level." : "get a parent."}`, code: "cloudroom_unsupported" }, 409);
+      }
     }
     if (["/tabs", "/read", "/unread", "/pin", "/unpin", "/pin-order"].includes(path)) return next();
     if (context.req.method === "POST" && ["/archive-all", "/unarchive"].includes(path)) return next();
@@ -527,7 +552,6 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     }
     return context.json({ message: "This action is not enabled for Cloud threads. Native execution is blocked.", code: "cloudroom_unsupported" }, 409);
   };
-  app.use("/api/v1/threads/:id", guard);
   app.use("/api/v1/threads/:id/*", guard);
 }
 

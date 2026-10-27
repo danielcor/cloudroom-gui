@@ -38,7 +38,7 @@ afterEach(cleanupTempDirs);
 
 let nextClientRequestIdValue = 1;
 const IMAGE_ATTACHMENT_LIMIT_BYTES = 10 * 1024 * 1024;
-const FILE_ATTACHMENT_LIMIT_BYTES = 25 * 1024 * 1024;
+const FILE_ATTACHMENT_LIMIT_BYTES = 100 * 1024 * 1024;
 
 type TextPromptInput = Extract<PromptInput, { type: "text" }>;
 

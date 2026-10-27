@@ -141,7 +141,7 @@ worktree` only; a provider takes its branch through `--environment-inputs`.
   upload automatically for absolute paths and `file:` URLs; use the explicit
   command when a reusable attachment token is needed. Image MIME types are
   capped at 10MB and other files at 25MB, and image/heic or image/heif uploads
-  are rejected (convert them to JPEG or PNG first). `room-cli project attachment
+  become JPEG on macOS (rejected elsewhere). `room-cli project attachment
 download <project-id> <attachment-path> --client-file <path>` writes existing
   attachment bytes on the CLI machine. There is no project-attachment list or
   per-file remove API.

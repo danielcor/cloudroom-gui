@@ -34,7 +34,7 @@ room-cli thread archive THREAD
 
 `thread move` moves a Local or Cloud thread (or `--self`) to another project by ID or name. It keeps its chat; its next turn starts fresh in that project's folder, and the old folder stays. A running thread moves when its turn ends.
 
-Make a thread a child with `room-cli thread update THREAD --parent-thread PARENT` (or `--self` as the child), or top-level with `--clear-parent-thread`. Unarchiving a child makes it top-level, so its parent stops getting its updates. Re-link it with `--parent-thread`.
+Make a thread a child with `room-cli thread update THREAD --parent-thread PARENT` (or `--self` as the child), or top-level with `--clear-parent-thread`. Unarchiving a child under an archived parent makes it top-level, so its parent stops getting its updates; unarchive the parent first. `room-cli thread unarchive THREAD --keep-parent` keeps the link anyway, but an archived parent gets none of its updates. Re-link a top-level child with `--parent-thread`. A Cloud thread sharing another thread's sandbox can only become top-level; one on a cloud VM can't change its parent. Parent changes and `unarchive` run from the Mac app or a Local thread; a Cloud thread's `room-cli` has neither.
 
 To move a Local thread into its own worktree, run `room-cli thread worktree`. It forks the thread, with its history, into a Cloudroom-managed worktree from its current commit, which Cloudroom deletes after archive. Never run `git worktree add` yourself; Cloudroom never cleans those folders up. Commit your changes first; then stop and tell the user to continue in the new thread.
 

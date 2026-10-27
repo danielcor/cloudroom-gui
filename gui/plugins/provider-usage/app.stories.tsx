@@ -1,8 +1,10 @@
-import { useState } from "react";
 import { StoryCard, StoryRow } from "../../apps/app/.ladle/story-card.js";
-import { ProviderUsageStatusContent, type UsageStoreSnapshot } from "./app.js";
+import {
+  ProviderUsageStatusContent,
+  UsagePageContent,
+  type UsageStoreSnapshot,
+} from "./app.js";
 import { fromAgentsAndHours, type PlanSummary } from "./plan-usage.js";
-import { UsageSettingsContent } from "./settings.js";
 import type {
   ProviderUsage,
   UsageMachine,
@@ -212,17 +214,12 @@ function storySnapshot(name: ScenarioName): UsageStoreSnapshot {
 }
 
 function SettingsPreview({ scenario }: { scenario: ScenarioName }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const machines = scenario === "loading" ? [] : scenarios[scenario].machines;
   return (
-    <div className="min-h-56 w-full max-w-3xl rounded-lg bg-background p-5">
-      <UsageSettingsContent
-        machines={machines}
-        selectedId={selectedId}
-        loading={scenario === "loading"}
-        error={scenario === "failedRefresh"}
-        onSelect={setSelectedId}
-        onRefresh={() => {}}
+    <div className="w-full max-w-3xl rounded-lg bg-background p-5">
+      <UsagePageContent
+        snapshot={storySnapshot(scenario)}
+        plan={fromAgentsAndHours(plans[1]!)}
+        refreshEnabled={false}
       />
     </div>
   );
@@ -231,12 +228,14 @@ function SettingsPreview({ scenario }: { scenario: ScenarioName }) {
 function FooterPreview({
   scenario,
   plan = null,
+  width = 303,
 }: {
   scenario: ScenarioName;
   plan?: PlanSummary | null;
+  width?: number;
 }) {
   return (
-    <div className="w-[303px] overflow-hidden rounded-xl border border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <div style={{ width }} className="overflow-hidden rounded-xl border border-sidebar-border bg-sidebar text-sidebar-foreground">
       <ProviderUsageStatusContent
         dismiss={() => {}}
         snapshot={storySnapshot(scenario)}
@@ -311,6 +310,19 @@ export function CloudroomPlan() {
       {plans.map((usage) => (
         <StoryRow key={usage.plan} label={usage.plan} hint="Last 30 days. Paid plans have unlimited cloud agents.">
           <FooterPreview scenario="local" plan={fromAgentsAndHours(usage)} />
+        </StoryRow>
+      ))}
+    </StoryCard>
+  );
+}
+
+export function SidebarWidths() {
+  const plan = fromAgentsAndHours(plans[4]!);
+  return (
+    <StoryCard labelWidth="180px">
+      {[400, 303, 260, 220, 190].map((width) => (
+        <StoryRow key={width} label={`${width}px`} hint="Bars shrink first so the percent and detail stay visible.">
+          <FooterPreview scenario="local" plan={plan} width={width} />
         </StoryRow>
       ))}
     </StoryCard>

@@ -387,10 +387,14 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
 
   patch(routes.update, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    if (payload.parentThreadId) {
+    if (
+      payload.parentThreadId &&
+      payload.parentThreadId !== thread.parentThreadId
+    ) {
       assertValidParentThread(deps, {
         childThreadId: thread.id,
         parentThreadId: payload.parentThreadId,
+        cloudChild: isCloudThread(thread),
       });
     }
 

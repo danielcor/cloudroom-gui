@@ -2413,8 +2413,13 @@ async function runDesktopApp(): Promise<void> {
   }
 
   const paths = createDesktopPathContext();
-  if (paths.isPackaged && process.platform === "darwin") {
+  const appImagePath = process.env.APPIMAGE?.trim() ?? "";
+  if (
+    paths.isPackaged &&
+    (process.platform === "darwin" || process.platform === "linux")
+  ) {
     void ensureRoomCliShim({
+      appImagePath: process.platform === "linux" ? appImagePath : undefined,
       cliPath: resolveBundledRoomCliPath(paths.appPath),
       homeDir: homedir(),
     })
@@ -2488,7 +2493,6 @@ async function runDesktopApp(): Promise<void> {
       () => undefined,
     );
   }
-  const appImagePath = process.env.APPIMAGE?.trim() ?? "";
   if (paths.isPackaged && process.platform === "linux" && appImagePath.length > 0) {
     void ensureLinuxDesktopEntry({
       appImagePath,

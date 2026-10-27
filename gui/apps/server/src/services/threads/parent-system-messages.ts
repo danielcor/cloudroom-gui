@@ -422,6 +422,16 @@ export async function queueParentSystemMessage(
   ) {
     return false;
   }
+  if (parentThread.executionTarget === "cloud") {
+    deps.logger.warn(
+      {
+        parentThreadId: parentThread.id,
+        systemMessageKind: args.systemMessageKind,
+      },
+      "Parent system message dropped: Cloud parents can't receive it",
+    );
+    return false;
+  }
   const hasPendingInteraction =
     deps.pendingInteractions.hasPendingThreadInteraction(parentThread.id);
   if (!hasPendingInteraction) {

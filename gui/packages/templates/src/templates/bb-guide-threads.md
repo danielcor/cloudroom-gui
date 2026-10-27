@@ -283,6 +283,11 @@ Messaging:
   and a queued answer carries the complete row as `queuedMessage`, including
   its `id`, `waitingOn`, and `sendAt`. A deferred message waits for a thread
   that failed while it was deferred, and delivers when the thread is retried.
+  A follow-up carries a thread's first prompt only if setup failed before the
+  workspace was ready and the thread wasn't stopped. `room-cli thread retry`
+  re-sends the most recent failed message (the original only if it never
+  reached the agent). After Stop, or when unsure, re-send the task yourself; a
+  carried first prompt is labeled for the agent, so a duplicate is harmless.
 
   --plan sends the same structured /plan command the composer's plan action
   sends, so the agent proposes a plan for approval before executing (Claude
@@ -326,7 +331,8 @@ Ownership:
 
   Clearing a parent inherits the former parent's section unless --section or
   --clear-section is also supplied. Children released by environment archiving
-  also inherit their former parent's section.
+  also inherit their former parent's section. Parent changes and unarchive run
+  from the Mac app or a Local thread; a Cloud thread's room-cli has neither.
 
   Cloudroom validates model and reasoning updates against the provider's current
   model catalog, applies them on the next turn, and keeps using them until
@@ -437,6 +443,7 @@ Lifecycle:
 
   room-cli thread unarchive [id]                 Unarchive a thread
     --self                                 Unarchive current thread
+    --keep-parent                          Stay under the parent, even an archived one
 
   room-cli thread delete <id>                    Delete permanently
     --yes                                  Skip confirmation

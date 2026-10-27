@@ -18,6 +18,11 @@
   a busy thread or a plugin's dispatch hook. `--reason <text>` labels the queued
   row. The SDK equivalent is `sdk.threads.retry({ threadId, turnRequestId?,
 sendAt?, reason? })`.
+- A follow-up carries a thread's first prompt only if setup failed before the
+  workspace was ready and the thread wasn't stopped. `room-cli thread retry`
+  re-sends the most recent failed message (the original only if it never
+  reached the agent). After Stop, or when unsure, re-send the task yourself; a
+  carried first prompt is labeled for the agent, so a duplicate is harmless.
 - For interrupted or stopped threads, inspect first. If the user stopped the
   thread, treat that as intentional unless they ask you to continue.
 - Use `room-cli thread stop <id>` when a thread is stuck or no longer needed.

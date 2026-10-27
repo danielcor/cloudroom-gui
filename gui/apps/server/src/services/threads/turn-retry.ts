@@ -207,6 +207,14 @@ function stoppedWhileScheduling(threadId: string): ApiError {
   );
 }
 
+function supersededWhileScheduling(threadId: string): ApiError {
+  return new ApiError(
+    409,
+    "no_failed_turn",
+    `Thread ${threadId} got a newer message while its retry was being scheduled.`,
+  );
+}
+
 /**
  * Re-submits a failed turn.
  *
@@ -254,6 +262,13 @@ export async function retryFailedTurn(
   retriesInFlight.add(inFlightKey);
   try {
     const attempt = chain.attemptNumber + 1;
+    const cancelledWhileScheduling = () =>
+      explicitStops.get(thread.id) !== stop
+        ? stoppedWhileScheduling(thread.id)
+        : loadFailedTurn(deps.db, thread.id)?.requestSequence !==
+            failed.requestSequence
+          ? supersededWhileScheduling(thread.id)
+          : null;
     const outcome = await attemptDispatch(deps, {
       thread,
       payload: {
@@ -274,20 +289,21 @@ export async function retryFailedTurn(
       pluginSubmission: null,
       retryOf: { requestId: originalRequestId, attempt },
       beforeDispatch: () => {
-        if (explicitStops.get(thread.id) !== stop) {
-          throw stoppedWhileScheduling(thread.id);
-        }
+        const cancelled = cancelledWhileScheduling();
+        if (cancelled !== null) throw cancelled;
       },
       origin: null,
       originPluginId: null,
       startedOnBehalfOf: null,
       trigger: "user",
     });
-    if (outcome.kind === "queued" && explicitStops.get(thread.id) !== stop) {
+    const cancelled =
+      outcome.kind === "queued" ? cancelledWhileScheduling() : null;
+    if (outcome.kind === "queued" && cancelled !== null) {
       if (deleteQueuedThreadMessage(deps.db, deps.hub, outcome.entry.id)) {
         emitPluginMessageCancelled(outcome.entry);
       }
-      throw stoppedWhileScheduling(thread.id);
+      throw cancelled;
     }
     if (outcome.kind === "dispatched") {
       return {

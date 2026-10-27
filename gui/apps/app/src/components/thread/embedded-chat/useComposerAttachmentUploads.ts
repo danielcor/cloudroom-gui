@@ -3,6 +3,10 @@ import { useUploadPromptAttachment } from "@/hooks/mutations/project-mutations";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 import { BbHttpError } from "@/lib/sdk";
 import type { PromptDraftAttachment } from "@cloudroom/client-core";
+import {
+  PROMPT_FILE_ATTACHMENT_LIMIT_BYTES,
+  PROMPT_IMAGE_ATTACHMENT_LIMIT_BYTES,
+} from "@cloudroom/domain";
 import type { InlineComposerDraftSession } from "./useActiveComposerDraft";
 
 interface UseComposerAttachmentUploadsArgs {
@@ -49,6 +53,16 @@ interface DraftAttachmentOperationState {
 function uploadRejectionReason(error: unknown): string | null {
   return error instanceof BbHttpError
     ? getMutationErrorMessage({ error, fallbackMessage: "Request failed" })
+    : null;
+}
+
+/** Fails oversized files before uploading them, with the server's message. */
+function oversizedFileReason(file: File): string | null {
+  const limit = file.type.startsWith("image/")
+    ? PROMPT_IMAGE_ATTACHMENT_LIMIT_BYTES
+    : PROMPT_FILE_ATTACHMENT_LIMIT_BYTES;
+  return file.size > limit
+    ? `Attachment exceeds ${limit / (1024 * 1024)}MB limit`
     : null;
 }
 
@@ -105,6 +119,12 @@ export function useDraftAttachmentUploads({
       let rejectionReason: string | null = null;
       try {
         for (const file of files) {
+          const oversized = oversizedFileReason(file);
+          if (oversized !== null) {
+            failedFiles.push(file.name);
+            rejectionReason ??= oversized;
+            continue;
+          }
           try {
             const uploaded = await uploadPromptAttachment.mutateAsync({
               projectId,

@@ -735,26 +735,27 @@ export function updateCachedThreadListStatusState(
   queryClient: QueryClient,
   threadId: string,
   statusChange: ThreadStatusChangeMetadata,
+  options?: { keepNewer: boolean },
 ): void {
+  const replaces = (thread: ThreadListEntry) =>
+    thread.id === threadId &&
+    !(options?.keepNewer && thread.updatedAt > statusChange.updatedAt);
   applyToCachedThreadListsAndSidebarNavigation(queryClient, (list) => {
-    if (!list.some((thread) => thread.id === threadId)) {
+    if (!list.some(replaces)) {
       return list;
     }
     return list.map((thread) =>
-      thread.id === threadId ? { ...thread, ...statusChange } : thread,
+      replaces(thread) ? { ...thread, ...statusChange } : thread,
     );
   });
 }
 
-export function getFetchingThreadListQueryKeys(
-  queryClient: QueryClient,
-): QueryKey[] {
+export function getFetchingThreadListQueries(queryClient: QueryClient) {
   return queryClient
     .getQueryCache()
     .findAll({ fetchStatus: "fetching" })
-    .map((query) => query.queryKey)
     .filter(
-      (queryKey) =>
+      ({ queryKey }) =>
         queryKey[0] === SIDEBAR_NAVIGATION_QUERY_KEY ||
         getThreadListFiltersFromQueryKey(queryKey) !== undefined ||
         getArchivedThreadListFiltersFromQueryKey(queryKey) !== undefined,

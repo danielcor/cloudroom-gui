@@ -105,11 +105,11 @@
               },
               {
                 "name": "node:fs",
-                "message": "Server must not use node:fs. Use daemon commands for workspace access. (attachments.ts is the only exception — it manages server-local storage.)"
+                "message": "Server must not use node:fs. Use daemon commands for workspace access. (attachments.ts and heic-to-jpeg.ts are the only exceptions — they manage server-local files.)"
               },
               {
                 "name": "node:fs/promises",
-                "message": "Server must not use node:fs/promises. Use daemon commands for workspace access. (attachments.ts is the only exception — it manages server-local storage.)"
+                "message": "Server must not use node:fs/promises. Use daemon commands for workspace access. (attachments.ts and heic-to-jpeg.ts are the only exceptions — they manage server-local files.)"
               }
             ]
           }

@@ -112,14 +112,14 @@ describe("public project attachments", () => {
       const oversizedFile = await upload(
         harness.app,
         project.id,
-        new File([new Uint8Array(25 * 1024 * 1024 + 1)], "huge-archive.bin", {
+        new File([new Uint8Array(100 * 1024 * 1024 + 1)], "huge-archive.bin", {
           type: "application/octet-stream",
         }),
       );
       expect(oversizedFile.status).toBe(400);
       await expect(readJson(oversizedFile)).resolves.toEqual({
         code: "invalid_request",
-        message: "Attachment exceeds 25MB limit",
+        message: "Attachment exceeds 100MB limit",
       });
 
       const ambiguous = await upload(
@@ -137,7 +137,7 @@ describe("public project attachments", () => {
     });
   });
 
-  it("rejects HEIC/HEIF image uploads instead of storing an image nothing can render", async () => {
+  it("rejects HEIC/HEIF image uploads it cannot convert to JPEG", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-project-attachment-heic",

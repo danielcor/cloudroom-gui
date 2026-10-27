@@ -94,8 +94,25 @@ export class CloudThreadEvents {
   private readonly prompts = new Map<string, Data>();
   private readonly started = new Set<string>();
   private turnId: string | null = null;
+  private piReply: { id: string; turnId: string; text: string } | null = null;
 
   constructor(private readonly threadId: string) {}
+
+  private closePiReply(): unknown[] {
+    const reply = this.piReply;
+    this.piReply = null;
+    return reply
+      ? [
+          {
+            threadId: this.threadId,
+            providerThreadId: PROVIDER_THREAD,
+            scope: turnScope(reply.turnId),
+            type: "item/completed",
+            item: { type: "agentMessage", id: reply.id, text: reply.text },
+          },
+        ]
+      : [];
+  }
 
   add(records: readonly CloudRecord[]): boolean {
     const before = this.events.length;
@@ -126,7 +143,9 @@ export class CloudThreadEvents {
 
   private project(record: CloudRecord): unknown[] {
     const data = object(record.data);
-    const out: unknown[] = [];
+    const piText = record.kind === "text_delta" && !data.item_id;
+    const out: unknown[] =
+      piText || record.kind === "receipt" ? [] : this.closePiReply();
     const turnBase = (turnId: string) => ({
       threadId: this.threadId,
       providerThreadId: PROVIDER_THREAD,
@@ -173,7 +192,7 @@ export class CloudThreadEvents {
         this.started.has(requestId)
       ) {
         const state = text(data.state);
-        out.push({
+        out.push(...this.closePiReply(), {
           ...turnBase(requestId),
           type: "turn/completed",
           status:
@@ -249,9 +268,27 @@ export class CloudThreadEvents {
     if (typeof native.method === "string")
       return this.codexFrame(native.method, object(native.params));
     const turnId = text(data.request_id) || this.turnId;
-    if (!turnId || !this.started.has(turnId) || !data.item_id) return out;
+    if (!turnId || !this.started.has(turnId) || !(piText || data.item_id))
+      return out;
     const base = turnBase(turnId);
-    const id = `${turnId}:${text(data.item_id)}`;
+    let id = `${turnId}:${text(data.item_id)}`;
+    if (piText) {
+      if (this.piReply?.turnId !== turnId) {
+        out.push(...this.closePiReply());
+        this.piReply = {
+          id: `${turnId}:pi:${record.sequence}`,
+          turnId,
+          text: "",
+        };
+        out.push({
+          ...base,
+          type: "item/started",
+          item: { type: "agentMessage", id: this.piReply.id, text: "" },
+        });
+      }
+      this.piReply.text += text(data.delta);
+      id = this.piReply.id;
+    }
     if (record.kind === "text_delta" && text(data.delta)) {
       out.push({
         ...base,
